@@ -1,1 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gimkit 3D Tag Arena</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Space Grotesk", system-ui, sans-serif;
+        background: #05060b;
+      }
 
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        min-height: 100vh;
+        background: radial-gradient(circle at top, #1c2350 0%, #0b0d1a 45%, #05060b 100%);
+        color: #e8edff;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(280px, 340px) 1fr minmax(260px, 320px);
+        min-height: 100vh;
+      }
+
+      .panel {
+        padding: 28px 24px;
+        background: rgba(6, 9, 22, 0.8);
+        border-right: 1px solid rgba(255, 255, 255, 0.06);
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+
+      .panel.right {
+        border-right: none;
+        border-left: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      .tag {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+        padding: 6px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(107, 149, 255, 0.35);
+        background: rgba(8, 12, 29, 0.6);
+        color: #b5c7ff;
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        width: fit-content;
+      }
+
+      h1 {
+        font-size: 1.8rem;
+        line-height: 1.15;
+      }
+
+      p {
+        color: #c0c6e5;
+        font-size: 0.98rem;
+        line-height: 1.6;
+      }
+
+      .status-card {
+        padding: 16px;
+        border-radius: 16px;
+        background: rgba(16, 22, 46, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        display: grid;
+        gap: 8px;
+      }
+
+      .status-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.9rem;
+        color: #cdd7ff;
+      }
+
+      .bar {
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.1);
+        overflow: hidden;
+      }
+
+      .bar span {
+        display: block;
+        height: 100%;
+        width: 60%;
+        background: linear-gradient(90deg, #5c89ff, #8b5bff);
+        box-shadow: 0 0 12px rgba(92, 137, 255, 0.8);
+      }
+
+      .controls {
+        display: grid;
+        gap: 10px;
+      }
+
+      .controls input,
+      .controls select,
+      .controls button {
+        font: inherit;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(10, 14, 30, 0.7);
+        color: inherit;
+      }
+
+      .controls button {
+        cursor: pointer;
+        font-weight: 600;
+        background: linear-gradient(135deg, #5c89ff, #8b5bff);
+        color: #0b0f24;
+      }
+
+      .controls button.secondary {
+        background: rgba(17, 22, 46, 0.8);
+        color: #d3dcff;
+      }
+
+      .upgrade-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .upgrade-item {
+        display: grid;
+        gap: 6px;
+        padding: 12px;
+        border-radius: 12px;
+        background: rgba(13, 18, 40, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .upgrade-item button {
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(92, 137, 255, 0.2);
+        color: #d9e1ff;
+        cursor: pointer;
+      }
+
+      .arena {
+        position: relative;
+        overflow: hidden;
+      }
+
+      canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+
+      .hud {
+        position: absolute;
+        bottom: 20px;
+        left: 20px;
+        display: grid;
+        gap: 12px;
+        z-index: 2;
+      }
+
+      .hud button {
+        padding: 12px 16px;
+        border-radius: 12px;
+        border: none;
+        font-weight: 600;
+        cursor: pointer;
+        background: linear-gradient(135deg, #5c89ff, #8b5bff);
+        color: #0b0f24;
+        box-shadow: 0 10px 24px rgba(92, 137, 255, 0.35);
+      }
+
+      .hud small {
+        color: #c7d2ff;
+      }
+
+      .overlay {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        padding: 10px 14px;
+        border-radius: 12px;
+        background: rgba(8, 12, 29, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        font-size: 0.9rem;
+        z-index: 2;
+      }
+
+      .log {
+        font-size: 0.85rem;
+        color: #a9b4df;
+        min-height: 60px;
+      }
+
+      @media (max-width: 1024px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        .panel.right {
+          border-left: none;
+          border-top: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .panel {
+          border-right: none;
+        }
+
+        .arena {
+          height: 60vh;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="layout">
+      <section class="panel">
+        <span class="tag">Gimkit 3D Tag Mode</span>
+        <h1>3D Gimkit: Tag Arena</h1>
+        <p>
+          Host or join a match with a simple room code. Players are split into black and
+          white teams. Every 30 seconds, the tagging order swaps.
+        </p>
+        <div class="status-card">
+          <div class="status-row"><span>Room</span><strong id="roomLabel">---</strong></div>
+          <div class="status-row"><span>Team</span><strong id="teamLabel">---</strong></div>
+          <div class="status-row"><span>Tag Order</span><strong id="tagOrder">---</strong></div>
+          <div class="status-row"><span>Energy</span><strong id="energyLabel">0</strong></div>
+          <div class="bar"><span id="energyBar"></span></div>
+        </div>
+        <div class="controls">
+          <input id="displayName" type="text" placeholder="Display name" />
+          <input id="roomCode" type="text" placeholder="Room code" />
+          <button id="hostBtn" type="button">Host Room</button>
+          <button id="joinBtn" class="secondary" type="button">Join Room</button>
+        </div>
+        <div class="log" id="log"></div>
+      </section>
+
+      <section class="arena">
+        <canvas id="renderCanvas"></canvas>
+        <div class="overlay" id="scoreBoard">Players: 1</div>
+        <div class="hud">
+          <button id="energyBtn" type="button">Generate Energy</button>
+          <small id="mathPrompt">Answer a math prompt to gain energy.</small>
+        </div>
+      </section>
+
+      <section class="panel right">
+        <h2>Upgrades</h2>
+        <p>Spend energy to boost your kit or unlock map lanes.</p>
+        <div class="upgrade-list" id="upgradeList"></div>
+      </section>
+    </main>
+
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script>
+      const state = {
+        peer: null,
+        connections: [],
+        playerId: null,
+        roomCode: null,
+        isHost: false,
+        players: {},
+        teamOrder: "black-tags",
+        tagTimer: 30,
+        energy: 0,
+        energyCap: 100,
+        energyEfficiency: 1,
+        speed: 1,
+        generatorLevel: 1,
+        unlockedZones: 1,
+      };
+
+      const upgrades = [
+        { id: "speed", label: "Speed Boost", cost: 20, value: 0.2 },
+        { id: "energyEfficiency", label: "Energy Efficiency", cost: 25, value: 0.2 },
+        { id: "energyCap", label: "Energy Capacity", cost: 30, value: 20 },
+        { id: "generatorLevel", label: "Generator Upgrade", cost: 35, value: 1 },
+        { id: "unlockedZones", label: "Unlock Map Sector", cost: 40, value: 1 },
+      ];
+
+      const roomLabel = document.getElementById("roomLabel");
+      const teamLabel = document.getElementById("teamLabel");
+      const tagOrder = document.getElementById("tagOrder");
+      const energyLabel = document.getElementById("energyLabel");
+      const energyBar = document.getElementById("energyBar");
+      const scoreBoard = document.getElementById("scoreBoard");
+      const log = document.getElementById("log");
+      const mathPrompt = document.getElementById("mathPrompt");
+
+      const writeLog = (message) => {
+        log.textContent = message;
+      };
+
+      const updateHud = () => {
+        energyLabel.textContent = Math.floor(state.energy);
+        const percent = Math.min(100, (state.energy / state.energyCap) * 100);
+        energyBar.style.width = `${percent}%`;
+        const localPlayer = state.players[state.playerId];
+        teamLabel.textContent = localPlayer ? localPlayer.team : "---";
+        tagOrder.textContent =
+          state.teamOrder === "black-tags" ? "Black tags White" : "White tags Black";
+        scoreBoard.textContent = `Players: ${Object.keys(state.players).length}`;
+      };
+
+      const broadcast = (payload) => {
+        state.connections.forEach((conn) => {
+          if (conn.open) {
+            conn.send(payload);
+          }
+        });
+      };
+
+      const updatePlayersForTeam = () => {
+        const ids = Object.keys(state.players);
+        ids.forEach((id, index) => {
+          state.players[id].team = index % 2 === 0 ? "black" : "white";
+        });
+      };
+
+      const syncState = () => {
+        broadcast({
+          type: "state",
+          players: state.players,
+          teamOrder: state.teamOrder,
+          tagTimer: state.tagTimer,
+        });
+      };
+
+      const addPlayer = (player) => {
+        state.players[player.id] = player;
+        updatePlayersForTeam();
+        updateHud();
+        syncState();
+      };
+
+      const handleConnection = (conn) => {
+        state.connections.push(conn);
+        conn.on("data", (data) => handleMessage(conn, data));
+        conn.on("close", () => {
+          delete state.players[conn.peer];
+          state.connections = state.connections.filter((item) => item !== conn);
+          updatePlayersForTeam();
+          updateHud();
+          syncState();
+        });
+      };
+
+      const handleMessage = (conn, data) => {
+        if (data.type === "join" && state.isHost) {
+          addPlayer({
+            id: conn.peer,
+            name: data.name,
+            position: data.position,
+            team: "black",
+            energy: 0,
+            score: 0,
+          });
+          conn.send({
+            type: "welcome",
+            id: conn.peer,
+            roomCode: state.roomCode,
+            players: state.players,
+            teamOrder: state.teamOrder,
+            tagTimer: state.tagTimer,
+          });
+          writeLog(`${data.name} joined the arena.`);
+          return;
+        }
+
+        if (data.type === "state" && !state.isHost) {
+          state.players = data.players;
+          state.teamOrder = data.teamOrder;
+          state.tagTimer = data.tagTimer;
+          updateHud();
+          return;
+        }
+
+        if (data.type === "position") {
+          if (state.players[data.id]) {
+            state.players[data.id].position = data.position;
+          }
+          return;
+        }
+
+        if (data.type === "tag" && state.isHost) {
+          handleTag(data.from, data.to);
+        }
+      };
+
+      const handleTag = (from, to) => {
+        const tagger = state.players[from];
+        const target = state.players[to];
+        if (!tagger || !target) return;
+
+        const allowedTeam = state.teamOrder === "black-tags" ? "black" : "white";
+        if (tagger.team !== allowedTeam || target.team === allowedTeam) return;
+
+        tagger.score = (tagger.score || 0) + 1;
+        tagger.energy = Math.min(state.energyCap, (tagger.energy || 0) + 10);
+        writeLog(`${tagger.name} tagged ${target.name}!`);
+        syncState();
+      };
+
+      const startTagTimer = () => {
+        setInterval(() => {
+          state.tagTimer -= 1;
+          if (state.tagTimer <= 0) {
+            state.teamOrder = state.teamOrder === "black-tags" ? "white-tags" : "black-tags";
+            state.tagTimer = 30;
+            syncState();
+          }
+          updateHud();
+        }, 1000);
+      };
+
+      const createRoom = () => {
+        const nameInput = document.getElementById("displayName").value || "Host";
+        const desiredCode = document.getElementById("roomCode").value.trim().toUpperCase();
+        const generatedCode = Math.random().toString(36).slice(2, 8).toUpperCase();
+        state.roomCode = desiredCode || generatedCode;
+        state.isHost = true;
+        state.peer = new Peer(state.roomCode);
+        state.peer.on("open", (id) => {
+          state.playerId = id;
+          roomLabel.textContent = state.roomCode;
+          state.players[id] = {
+            id,
+            name: nameInput,
+            team: "black",
+            position: { x: 0, y: 1, z: 0 },
+            energy: state.energy,
+            score: 0,
+          };
+          updateHud();
+          writeLog("Room hosted. Share the room code.");
+          startTagTimer();
+        });
+        state.peer.on("connection", handleConnection);
+      };
+
+      const joinRoom = () => {
+        const nameInput = document.getElementById("displayName").value || "Player";
+        const code = document.getElementById("roomCode").value.trim().toUpperCase();
+        if (!code) {
+          writeLog("Enter a room code to join.");
+          return;
+        }
+        state.isHost = false;
+        state.peer = new Peer();
+        state.peer.on("open", () => {
+          state.roomCode = code;
+          roomLabel.textContent = code;
+          const conn = state.peer.connect(code);
+          conn.on("open", () => {
+            conn.send({
+              type: "join",
+              name: nameInput,
+              position: { x: 2, y: 1, z: 2 },
+            });
+          });
+          conn.on("data", (data) => {
+            if (data.type === "welcome") {
+              state.playerId = data.id;
+              state.players = data.players;
+              state.teamOrder = data.teamOrder;
+              state.tagTimer = data.tagTimer;
+              updateHud();
+              writeLog("Connected to host.");
+            }
+            if (data.type === "state") {
+              state.players = data.players;
+              state.teamOrder = data.teamOrder;
+              state.tagTimer = data.tagTimer;
+              updateHud();
+            }
+          });
+          conn.on("close", () => writeLog("Disconnected from host."));
+          state.connections = [conn];
+        });
+      };
+
+      const renderUpgrades = () => {
+        const list = document.getElementById("upgradeList");
+        list.innerHTML = "";
+        upgrades.forEach((upgrade) => {
+          const item = document.createElement("div");
+          item.className = "upgrade-item";
+          item.innerHTML = `
+            <strong>${upgrade.label}</strong>
+            <span>Cost: ${upgrade.cost} energy</span>
+            <button type="button">Purchase</button>
+          `;
+          item.querySelector("button").addEventListener("click", () => {
+            if (state.energy < upgrade.cost) {
+              writeLog("Not enough energy for that upgrade.");
+              return;
+            }
+            state.energy -= upgrade.cost;
+            state[upgrade.id] += upgrade.value;
+            if (upgrade.id === "energyCap") {
+              state.energyCap += upgrade.value;
+            }
+            updateHud();
+            writeLog(`${upgrade.label} upgraded!`);
+          });
+          list.appendChild(item);
+        });
+      };
+
+      const mathProblems = [
+        { question: "8 + 7", answer: 15 },
+        { question: "12 - 5", answer: 7 },
+        { question: "6 x 3", answer: 18 },
+        { question: "20 / 4", answer: 5 },
+      ];
+
+      const generateEnergy = () => {
+        const problem = mathProblems[Math.floor(Math.random() * mathProblems.length)];
+        const response = window.prompt(`Solve to gain energy: ${problem.question}`);
+        if (response !== null && Number(response) === problem.answer) {
+          const gain = 10 * state.energyEfficiency;
+          state.energy = Math.min(state.energyCap, state.energy + gain);
+          writeLog("Correct! Energy boosted.");
+        } else {
+          writeLog("Incorrect. Try again.");
+        }
+        updateHud();
+      };
+
+      document.getElementById("hostBtn").addEventListener("click", createRoom);
+      document.getElementById("joinBtn").addEventListener("click", joinRoom);
+      document.getElementById("energyBtn").addEventListener("click", generateEnergy);
+      renderUpgrades();
+      updateHud();
+
+      const canvas = document.getElementById("renderCanvas");
+      const engine = new BABYLON.Engine(canvas, true);
+      const scene = new BABYLON.Scene(engine);
+      scene.clearColor = new BABYLON.Color4(0.02, 0.03, 0.08, 1);
+
+      const camera = new BABYLON.UniversalCamera("camera", new BABYLON.Vector3(0, 6, -12), scene);
+      camera.setTarget(BABYLON.Vector3.Zero());
+      camera.attachControl(canvas, true);
+
+      const light = new BABYLON.HemisphericLight(
+        "light",
+        new BABYLON.Vector3(0, 1, 0),
+        scene
+      );
+      light.intensity = 0.9;
+
+      const ground = BABYLON.MeshBuilder.CreateGround(
+        "ground",
+        { width: 40, height: 40 },
+        scene
+      );
+      const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
+      groundMat.diffuseColor = new BABYLON.Color3(0.08, 0.1, 0.2);
+      ground.material = groundMat;
+
+      const zoneWalls = [];
+      const createZone = (index) => {
+        const wall = BABYLON.MeshBuilder.CreateBox(
+          `wall-${index}`,
+          { width: 40, height: 4, depth: 0.5 },
+          scene
+        );
+        wall.position = new BABYLON.Vector3(0, 2, 10 + index * 8);
+        wall.material = new BABYLON.StandardMaterial(`wallMat-${index}`, scene);
+        wall.material.diffuseColor = new BABYLON.Color3(0.2, 0.2, 0.4);
+        zoneWalls.push(wall);
+      };
+      [0, 1, 2].forEach((index) => createZone(index));
+
+      const playerMeshes = {};
+      const getOrCreatePlayerMesh = (player) => {
+        if (playerMeshes[player.id]) return playerMeshes[player.id];
+        const mesh = BABYLON.MeshBuilder.CreateSphere(`player-${player.id}`, { diameter: 1.4 }, scene);
+        const mat = new BABYLON.StandardMaterial(`mat-${player.id}`, scene);
+        if (player.team === "black") {
+          mat.diffuseColor = new BABYLON.Color3(0.08, 0.08, 0.1);
+          mat.emissiveColor = new BABYLON.Color3(0.2, 0.2, 0.3);
+        } else {
+          mat.diffuseColor = new BABYLON.Color3(0.9, 0.9, 0.95);
+          mat.emissiveColor = new BABYLON.Color3(0.6, 0.6, 0.7);
+        }
+        mesh.material = mat;
+        playerMeshes[player.id] = mesh;
+        return mesh;
+      };
+
+      const updateZoneLocks = () => {
+        zoneWalls.forEach((wall, index) => {
+          wall.isVisible = index >= state.unlockedZones;
+        });
+      };
+
+      const updateScene = () => {
+        Object.values(state.players).forEach((player) => {
+          const mesh = getOrCreatePlayerMesh(player);
+          mesh.position = new BABYLON.Vector3(
+            player.position.x,
+            player.position.y,
+            player.position.z
+          );
+        });
+        updateZoneLocks();
+      };
+
+      const sendPosition = () => {
+        if (!state.playerId || !state.players[state.playerId]) return;
+        const player = state.players[state.playerId];
+        const speedFactor = 0.08 + state.speed * 0.02;
+        const inputMap = scene.inputMap || {};
+        if (inputMap["w"] || inputMap["ArrowUp"]) player.position.z += speedFactor;
+        if (inputMap["s"] || inputMap["ArrowDown"]) player.position.z -= speedFactor;
+        if (inputMap["a"] || inputMap["ArrowLeft"]) player.position.x -= speedFactor;
+        if (inputMap["d"] || inputMap["ArrowRight"]) player.position.x += speedFactor;
+        if (state.isHost) {
+          syncState();
+        } else if (state.connections[0]?.open) {
+          state.connections[0].send({ type: "position", id: state.playerId, position: player.position });
+        }
+      };
+
+      scene.onKeyboardObservable.add((info) => {
+        scene.inputMap = scene.inputMap || {};
+        if (info.type === BABYLON.KeyboardEventTypes.KEYDOWN) {
+          scene.inputMap[info.event.key] = true;
+        } else if (info.type === BABYLON.KeyboardEventTypes.KEYUP) {
+          scene.inputMap[info.event.key] = false;
+        }
+      });
+
+      const checkTags = () => {
+        if (!state.isHost) return;
+        const ids = Object.keys(state.players);
+        ids.forEach((id) => {
+          ids.forEach((otherId) => {
+            if (id === otherId) return;
+            const player = state.players[id];
+            const other = state.players[otherId];
+            const dx = player.position.x - other.position.x;
+            const dz = player.position.z - other.position.z;
+            const distance = Math.hypot(dx, dz);
+            if (distance < 1.4) {
+              handleTag(id, otherId);
+            }
+          });
+        });
+      };
+
+      engine.runRenderLoop(() => {
+        sendPosition();
+        updateScene();
+        checkTags();
+        scene.render();
+      });
+
+      window.addEventListener("resize", () => engine.resize());
+    </script>
+  </body>
+</html>
