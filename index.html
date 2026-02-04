@@ -1,1 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gimkit 3D Concept</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Space Grotesk", system-ui, sans-serif;
+        background: #0b0d1a;
+      }
 
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 48px 24px;
+        background: radial-gradient(circle at top, #1c2350 0%, #0b0d1a 45%, #05060b 100%);
+        overflow-x: hidden;
+      }
+
+      .scene {
+        max-width: 1100px;
+        width: 100%;
+        display: grid;
+        gap: 32px;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        align-items: center;
+      }
+
+      .copy {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      .tag {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 14px;
+        border-radius: 999px;
+        border: 1px solid rgba(107, 149, 255, 0.35);
+        background: rgba(8, 12, 29, 0.6);
+        color: #b5c7ff;
+        font-size: 0.9rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        width: fit-content;
+      }
+
+      h1 {
+        font-size: clamp(2.4rem, 4vw, 3.6rem);
+        line-height: 1.05;
+        color: #f4f7ff;
+      }
+
+      p {
+        color: #c0c6e5;
+        font-size: 1.05rem;
+        line-height: 1.6;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .actions button {
+        border: none;
+        border-radius: 12px;
+        padding: 12px 18px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      .actions button.primary {
+        background: linear-gradient(135deg, #5c89ff, #8b5bff);
+        color: #0a0f24;
+        box-shadow: 0 12px 32px rgba(92, 137, 255, 0.35);
+      }
+
+      .actions button.secondary {
+        background: rgba(17, 22, 46, 0.8);
+        color: #d3dcff;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .actions button:hover {
+        transform: translateY(-2px) scale(1.01);
+      }
+
+      .dashboard {
+        position: relative;
+        width: min(420px, 90vw);
+        height: min(420px, 90vw);
+        perspective: 1200px;
+        margin: 0 auto;
+      }
+
+      .hologram {
+        position: absolute;
+        inset: 0;
+        border-radius: 28px;
+        background: linear-gradient(160deg, rgba(27, 38, 86, 0.8), rgba(9, 12, 24, 0.85));
+        box-shadow: 0 30px 80px rgba(4, 6, 16, 0.7);
+        transform-style: preserve-3d;
+        transition: transform 0.2s ease-out;
+        display: grid;
+        place-items: center;
+      }
+
+      .grid {
+        position: absolute;
+        inset: 20px;
+        border-radius: 22px;
+        border: 1px solid rgba(126, 168, 255, 0.2);
+        transform: translateZ(20px);
+        background-image: linear-gradient(
+            rgba(255, 255, 255, 0.08) 1px,
+            transparent 1px
+          ),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+        background-size: 26px 26px;
+      }
+
+      .cube {
+        position: absolute;
+        width: 140px;
+        height: 140px;
+        transform-style: preserve-3d;
+        transform: translateZ(60px) rotateX(-12deg) rotateY(32deg);
+      }
+
+      .cube-face {
+        position: absolute;
+        inset: 0;
+        background: rgba(98, 139, 255, 0.15);
+        border: 1px solid rgba(145, 179, 255, 0.4);
+        box-shadow: inset 0 0 24px rgba(132, 160, 255, 0.3);
+      }
+
+      .cube-face.front {
+        transform: translateZ(70px);
+      }
+
+      .cube-face.back {
+        transform: rotateY(180deg) translateZ(70px);
+      }
+
+      .cube-face.right {
+        transform: rotateY(90deg) translateZ(70px);
+      }
+
+      .cube-face.left {
+        transform: rotateY(-90deg) translateZ(70px);
+      }
+
+      .cube-face.top {
+        transform: rotateX(90deg) translateZ(70px);
+      }
+
+      .cube-face.bottom {
+        transform: rotateX(-90deg) translateZ(70px);
+      }
+
+      .hud {
+        position: absolute;
+        bottom: 24px;
+        left: 24px;
+        right: 24px;
+        display: grid;
+        gap: 12px;
+        transform: translateZ(35px);
+      }
+
+      .hud-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.9rem;
+        color: #cdd7ff;
+      }
+
+      .bar {
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+      }
+
+      .bar span {
+        display: block;
+        height: 100%;
+        width: 78%;
+        background: linear-gradient(90deg, #5c89ff, #8b5bff);
+        box-shadow: 0 0 12px rgba(92, 137, 255, 0.8);
+      }
+
+      .orbit {
+        position: absolute;
+        inset: 60px;
+        border-radius: 50%;
+        border: 1px dashed rgba(115, 157, 255, 0.3);
+        transform: translateZ(15px);
+      }
+
+      .chip {
+        position: absolute;
+        top: 30px;
+        right: 30px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(10, 14, 32, 0.7);
+        color: #93b0ff;
+        font-size: 0.8rem;
+        transform: translateZ(50px);
+      }
+
+      .floating-card {
+        position: absolute;
+        top: -18px;
+        left: 30px;
+        padding: 12px 16px;
+        border-radius: 16px;
+        background: rgba(20, 28, 58, 0.88);
+        color: #e1e7ff;
+        font-weight: 600;
+        transform: translateZ(80px);
+        box-shadow: 0 10px 24px rgba(3, 6, 18, 0.6);
+      }
+
+      .floating-card small {
+        display: block;
+        font-weight: 400;
+        color: #9fb1ff;
+      }
+
+      @media (max-width: 720px) {
+        body {
+          padding: 32px 16px;
+        }
+
+        .dashboard {
+          order: -1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="scene">
+      <section class="copy">
+        <span class="tag">3D Gimkit concept</span>
+        <h1>Build, explore, and battle in a fully immersive Gimkit universe.</h1>
+        <p>
+          Step into a holographic classroom where quizzes become co-op missions. Live
+          leaderboards float in space, power-ups surround you, and every answer shapes
+          the world in real time.
+        </p>
+        <div class="actions">
+          <button class="primary" type="button">Launch 3D Mode</button>
+          <button class="secondary" type="button">View Arena Map</button>
+        </div>
+      </section>
+
+      <section class="dashboard" aria-label="3D Gimkit dashboard">
+        <div class="hologram" id="hologram">
+          <div class="grid"></div>
+          <div class="orbit"></div>
+          <div class="cube" aria-hidden="true">
+            <div class="cube-face front"></div>
+            <div class="cube-face back"></div>
+            <div class="cube-face right"></div>
+            <div class="cube-face left"></div>
+            <div class="cube-face top"></div>
+            <div class="cube-face bottom"></div>
+          </div>
+          <div class="floating-card">
+            12 Teams Online
+            <small>Mission: Orbital Rush</small>
+          </div>
+          <div class="chip">XP +30%</div>
+          <div class="hud">
+            <div class="hud-row">
+              <span>Energy</span>
+              <span>78%</span>
+            </div>
+            <div class="bar"><span></span></div>
+            <div class="hud-row">
+              <span>Combo</span>
+              <span>14x</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script>
+      const hologram = document.getElementById("hologram");
+
+      const handleMove = (event) => {
+        const bounds = hologram.getBoundingClientRect();
+        const x = event.clientX - bounds.left;
+        const y = event.clientY - bounds.top;
+        const rotateY = ((x / bounds.width) * 2 - 1) * 12;
+        const rotateX = ((y / bounds.height) * 2 - 1) * -12;
+        hologram.style.transform = `rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
+      };
+
+      const reset = () => {
+        hologram.style.transform = "rotateX(0deg) rotateY(0deg)";
+      };
+
+      hologram.addEventListener("mousemove", handleMove);
+      hologram.addEventListener("mouseleave", reset);
+    </script>
+  </body>
+</html>
