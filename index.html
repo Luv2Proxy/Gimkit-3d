@@ -560,8 +560,12 @@
       const scene = new BABYLON.Scene(engine);
       scene.clearColor = new BABYLON.Color4(0.02, 0.03, 0.08, 1);
 
-      const camera = new BABYLON.UniversalCamera("camera", new BABYLON.Vector3(0, 6, -12), scene);
-      camera.setTarget(BABYLON.Vector3.Zero());
+      const camera = new BABYLON.FollowCamera("camera", new BABYLON.Vector3(0, 6, -12), scene);
+      camera.radius = 14;
+      camera.heightOffset = 5;
+      camera.rotationOffset = 180;
+      camera.cameraAcceleration = 0.05;
+      camera.maxCameraSpeed = 12;
       camera.attachControl(canvas, true);
 
       const light = new BABYLON.HemisphericLight(
@@ -595,6 +599,15 @@
       [0, 1, 2].forEach((index) => createZone(index));
 
       const playerMeshes = {};
+      const lockCameraOnLocalPlayer = () => {
+        if (!state.playerId) return;
+        const target = playerMeshes[state.playerId];
+        if (!target) return;
+        if (camera.lockedTarget !== target) {
+          camera.lockedTarget = target;
+        }
+      };
+
       const getOrCreatePlayerMesh = (player) => {
         if (playerMeshes[player.id]) return playerMeshes[player.id];
         const mesh = BABYLON.MeshBuilder.CreateSphere(`player-${player.id}`, { diameter: 1.4 }, scene);
@@ -608,6 +621,9 @@
         }
         mesh.material = mat;
         playerMeshes[player.id] = mesh;
+        if (player.id === state.playerId) {
+          lockCameraOnLocalPlayer();
+        }
         return mesh;
       };
 
@@ -627,6 +643,7 @@
           );
         });
         updateZoneLocks();
+        lockCameraOnLocalPlayer();
       };
 
       const sendPosition = () => {
@@ -676,6 +693,7 @@
         sendPosition();
         updateScene();
         checkTags();
+        lockCameraOnLocalPlayer();
         scene.render();
       });
 
