@@ -11,31 +11,35 @@ export const TEAM_WHITE = 'white';
 export const TEAM_META = {
   [TEAM_BLACK]: {
     label: 'Black',
-    color: '#111111',
-    spawn: { x: 170, y: 500 },
-    base: { x: 110, y: 500 }
+    color: '#202020',
+    spawn: { x: -45, y: 1.1, z: 0 },
+    base: { x: -56, y: 1.1, z: 0 }
   },
   [TEAM_WHITE]: {
     label: 'White',
-    color: '#f2f2f2',
-    spawn: { x: 1630, y: 500 },
-    base: { x: 1690, y: 500 }
+    color: '#efefef',
+    spawn: { x: 45, y: 1.1, z: 0 },
+    base: { x: 56, y: 1.1, z: 0 }
   }
 };
 
 export const ARENA = {
-  width: 1800,
-  height: 1000,
-  playerRadius: 16,
-  tagRange: 40,
-  flagRadius: 18
+  width: 140,
+  depth: 90,
+  playerRadius: 1,
+  playerHeight: 2.2,
+  tagRange: 3.4,
+  flagRadius: 1.1,
+  floorY: 1.1
 };
 
 export const RULES = {
   maxScore: 3,
-  tickRate: 20,
-  moveSpeed: 220,
-  carrierSpeedMultiplier: 0.87,
+  tickRate: 30,
+  moveSpeed: 13,
+  carrierSpeedMultiplier: 0.84,
+  jumpVelocity: 8,
+  gravity: 22,
   tagCooldownMs: 1400,
   respawnInvulnMs: 1500,
   matchSeconds: 7 * 60
@@ -75,8 +79,9 @@ export function clamp(n, min, max) {
 
 export function distSq(a, b) {
   const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return dx * dx + dy * dy;
+  const dz = a.z - b.z;
+  const dy = (a.y || 0) - (b.y || 0);
+  return dx * dx + dy * dy + dz * dz;
 }
 
 export function fmtTime(totalSeconds) {

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CTF Game</title>
+    <title>CTF 3D Game</title>
     <link rel="stylesheet" href="./assets/styles.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
       <section id="game-layout">
         <canvas id="arena"></canvas>
         <aside id="hud">
-          <h2>Capture The Flag</h2>
+          <h2>Capture The Flag 3D</h2>
           <div id="error"></div>
           <div class="stat"><span>Room</span><strong id="room-stat">-</strong></div>
           <div class="stat"><span>Connected Players</span><strong id="peers-stat">1</strong></div>
@@ -22,7 +22,7 @@
           <h3>Score</h3>
           <div class="stat"><span>Black</span><strong id="black-score">0</strong></div>
           <div class="stat"><span>White</span><strong id="white-score">0</strong></div>
-          <p class="small">Controls: WASD or Arrow keys. Get enemy flag to your base while your flag is home.</p>
+          <p class="small">Controls: Click canvas to lock mouse. WASD to move, Space to jump, Mouse to look.</p>
           <h3>Events</h3>
           <div class="log" id="event-feed"></div>
         </aside>
@@ -30,6 +30,8 @@
     </main>
 
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
     <script type="module" src="./src/game.js"></script>
   </body>
 </html>

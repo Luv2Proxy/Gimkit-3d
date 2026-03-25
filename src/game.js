@@ -12,7 +12,6 @@ import {
 import { NetClient } from './network.js';
 
 const canvas = document.getElementById('arena');
-const ctx = canvas.getContext('2d');
 const errorEl = document.getElementById('error');
 const statEl = {
   room: document.getElementById('room-stat'),
@@ -26,21 +25,37 @@ const statEl = {
 };
 
 const profile = loadProfile();
-const search = new URLSearchParams(location.search);
-const room = search.get('room') || profile.roomCode;
-const role = search.get('role') || profile.role;
+const params = new URLSearchParams(location.search);
+const room = params.get('room') || profile.roomCode;
+const role = params.get('role') || profile.role;
+if (!room || !role || !profile.username) location.href = './join.html';
 
-if (!room || !role || !profile.username) {
-  location.href = './join.html';
-}
+const obstacles = [
+  { x: -20, z: -20, w: 8, d: 8, h: 3 },
+  { x: 10, z: 16, w: 12, d: 6, h: 3 },
+  { x: 0, z: 0, w: 7, d: 22, h: 4 },
+  { x: -42, z: 19, w: 10, d: 8, h: 3 },
+  { x: 37, z: -16, w: 9, d: 10, h: 4 },
+  { x: 28, z: 30, w: 7, d: 7, h: 5 }
+];
 
 const state = {
   mePeerId: null,
   match: null,
-  inputs: { up: false, down: false, left: false, right: false },
+  inputs: { forward: false, back: false, left: false, right: false, jump: false, yaw: 0, pitch: 0 },
   seq: 0,
-  camera: { x: 0, y: 0 },
+  pointerLocked: false,
   connectedPlayers: 1
+};
+
+const render = {
+  engine: null,
+  scene: null,
+  camera: null,
+  adt: null,
+  playerMeshes: new Map(),
+  nameplates: new Map(),
+  flagMeshes: new Map()
 };
 
 const net = new NetClient({
@@ -63,20 +78,8 @@ function pushFeed(text) {
 
 function mkFlags() {
   return {
-    [TEAM_BLACK]: {
-      team: TEAM_BLACK,
-      x: TEAM_META[TEAM_BLACK].base.x,
-      y: TEAM_META[TEAM_BLACK].base.y,
-      holderId: null,
-      atBase: true
-    },
-    [TEAM_WHITE]: {
-      team: TEAM_WHITE,
-      x: TEAM_META[TEAM_WHITE].base.x,
-      y: TEAM_META[TEAM_WHITE].base.y,
-      holderId: null,
-      atBase: true
-    }
+    [TEAM_BLACK]: { team: TEAM_BLACK, x: TEAM_META[TEAM_BLACK].base.x, y: ARENA.floorY, z: TEAM_META[TEAM_BLACK].base.z, holderId: null, atBase: true },
+    [TEAM_WHITE]: { team: TEAM_WHITE, x: TEAM_META[TEAM_WHITE].base.x, y: ARENA.floorY, z: TEAM_META[TEAM_WHITE].base.z, holderId: null, atBase: true }
   };
 }
 
@@ -101,7 +104,7 @@ function assignTeam(match) {
 
 function spawnFor(team) {
   const base = TEAM_META[team].spawn;
-  return { x: base.x, y: base.y };
+  return { x: base.x, y: base.y, z: base.z };
 }
 
 function addPlayer(match, id, username, color, forcedTeam = null) {
@@ -114,22 +117,16 @@ function addPlayer(match, id, username, color, forcedTeam = null) {
     team,
     x: spawn.x,
     y: spawn.y,
+    z: spawn.z,
+    vy: 0,
+    onGround: true,
+    yaw: team === TEAM_BLACK ? 0 : Math.PI,
+    pitch: 0,
     tagCooldownUntil: 0,
-    respawnUntil: Date.now() + 800,
+    respawnUntil: Date.now() + 600,
     carryingFlagOf: null,
-    input: { up: false, down: false, left: false, right: false }
+    input: { forward: false, back: false, left: false, right: false, jump: false, yaw: 0, pitch: 0 }
   };
-}
-
-function removePlayer(match, id) {
-  if (!match.players[id]) return;
-  dropFlag(match, id, true);
-  delete match.players[id];
-}
-
-function addEvent(match, text) {
-  match.events.unshift({ t: Date.now(), text });
-  match.events = match.events.slice(0, 30);
 }
 
 function dropFlag(match, playerId, resetToBase = false) {
@@ -143,13 +140,26 @@ function dropFlag(match, playerId, resetToBase = false) {
     flag.holderId = null;
     flag.atBase = true;
     flag.x = TEAM_META[enemyTeam].base.x;
-    flag.y = TEAM_META[enemyTeam].base.y;
+    flag.y = ARENA.floorY;
+    flag.z = TEAM_META[enemyTeam].base.z;
   } else {
     flag.holderId = null;
     flag.atBase = false;
     flag.x = player.x;
-    flag.y = player.y;
+    flag.y = ARENA.floorY;
+    flag.z = player.z;
   }
+}
+
+function removePlayer(match, id) {
+  if (!match.players[id]) return;
+  dropFlag(match, id, true);
+  delete match.players[id];
+}
+
+function addEvent(match, text) {
+  match.events.unshift({ t: Date.now(), text });
+  match.events = match.events.slice(0, 30);
 }
 
 function respawnPlayer(match, playerId, reason) {
@@ -159,36 +169,74 @@ function respawnPlayer(match, playerId, reason) {
   const spawn = spawnFor(p.team);
   p.x = spawn.x;
   p.y = spawn.y;
+  p.z = spawn.z;
+  p.vy = 0;
+  p.onGround = true;
   p.respawnUntil = Date.now() + RULES.respawnInvulnMs;
   addEvent(match, `${p.username} was tagged (${reason})`);
 }
 
+function obstacleCollision(nx, nz, radius) {
+  return obstacles.some((o) => nx + radius > o.x - o.w / 2 && nx - radius < o.x + o.w / 2 && nz + radius > o.z - o.d / 2 && nz - radius < o.z + o.d / 2);
+}
+
+function processMovement(player, dt) {
+  player.yaw = player.input.yaw;
+  player.pitch = player.input.pitch;
+
+  const forward = (player.input.forward ? 1 : 0) - (player.input.back ? 1 : 0);
+  const strafe = (player.input.right ? 1 : 0) - (player.input.left ? 1 : 0);
+
+  const sin = Math.sin(player.yaw);
+  const cos = Math.cos(player.yaw);
+  const worldX = forward * sin + strafe * cos;
+  const worldZ = forward * cos - strafe * sin;
+  const mag = Math.hypot(worldX, worldZ) || 1;
+
+  const speed = player.carryingFlagOf ? RULES.moveSpeed * RULES.carrierSpeedMultiplier : RULES.moveSpeed;
+  const moveX = (worldX / mag) * speed * dt;
+  const moveZ = (worldZ / mag) * speed * dt;
+
+  let nextX = clamp(player.x + moveX, -ARENA.width / 2 + ARENA.playerRadius, ARENA.width / 2 - ARENA.playerRadius);
+  let nextZ = clamp(player.z + moveZ, -ARENA.depth / 2 + ARENA.playerRadius, ARENA.depth / 2 - ARENA.playerRadius);
+
+  if (!obstacleCollision(nextX, player.z, ARENA.playerRadius)) player.x = nextX;
+  if (!obstacleCollision(player.x, nextZ, ARENA.playerRadius)) player.z = nextZ;
+
+  if (player.input.jump && player.onGround) {
+    player.vy = RULES.jumpVelocity;
+    player.onGround = false;
+  }
+
+  player.vy -= RULES.gravity * dt;
+  player.y += player.vy * dt;
+
+  if (player.y <= ARENA.floorY) {
+    player.y = ARENA.floorY;
+    player.vy = 0;
+    player.onGround = true;
+  }
+}
+
 function processTick(match, dt) {
   const now = Date.now();
-  Object.values(match.players).forEach((p) => {
-    const speed = p.carryingFlagOf ? RULES.moveSpeed * RULES.carrierSpeedMultiplier : RULES.moveSpeed;
-    const dx = (p.input.right ? 1 : 0) - (p.input.left ? 1 : 0);
-    const dy = (p.input.down ? 1 : 0) - (p.input.up ? 1 : 0);
-    const mag = Math.hypot(dx, dy) || 1;
-    p.x = clamp(p.x + (dx / mag) * speed * dt, ARENA.playerRadius, ARENA.width - ARENA.playerRadius);
-    p.y = clamp(p.y + (dy / mag) * speed * dt, ARENA.playerRadius, ARENA.height - ARENA.playerRadius);
-  });
+  Object.values(match.players).forEach((p) => processMovement(p, dt));
 
-  // flag follow
   Object.values(match.flags).forEach((flag) => {
     if (flag.holderId && match.players[flag.holderId]) {
       const holder = match.players[flag.holderId];
       flag.x = holder.x;
-      flag.y = holder.y;
+      flag.y = holder.y + 1.2;
+      flag.z = holder.z;
       flag.atBase = false;
     }
   });
 
-  // pickups + captures
   Object.values(match.players).forEach((p) => {
     if (now < p.respawnUntil) return;
     const enemy = p.team === TEAM_BLACK ? TEAM_WHITE : TEAM_BLACK;
     const enemyFlag = match.flags[enemy];
+
     if (!p.carryingFlagOf && !enemyFlag.holderId && distSq(p, enemyFlag) <= (ARENA.playerRadius + ARENA.flagRadius) ** 2) {
       p.carryingFlagOf = enemy;
       enemyFlag.holderId = p.id;
@@ -199,12 +247,11 @@ function processTick(match, dt) {
     if (p.carryingFlagOf) {
       const homeFlag = match.flags[p.team];
       const base = TEAM_META[p.team].base;
-      if (homeFlag.atBase && distSq(p, base) <= (ARENA.playerRadius + 26) ** 2) {
+      if (homeFlag.atBase && distSq(p, base) <= 7 * 7) {
         match.scores[p.team] += 1;
-        addEvent(match, `${p.username} captured for ${TEAM_META[p.team].label}`);
         p.carryingFlagOf = null;
         match.flags = mkFlags();
-
+        addEvent(match, `${p.username} captured for ${TEAM_META[p.team].label}`);
         if (match.scores[p.team] >= RULES.maxScore) {
           match.winner = p.team;
           match.endsAt = Date.now();
@@ -214,7 +261,6 @@ function processTick(match, dt) {
     }
   });
 
-  // tagging
   const players = Object.values(match.players);
   for (let i = 0; i < players.length; i += 1) {
     for (let j = i + 1; j < players.length; j += 1) {
@@ -222,9 +268,11 @@ function processTick(match, dt) {
       const b = players[j];
       if (a.team === b.team) continue;
       if (distSq(a, b) > ARENA.tagRange * ARENA.tagRange) continue;
+
       const aCanTag = now > a.tagCooldownUntil && now > a.respawnUntil;
       const bCanTag = now > b.tagCooldownUntil && now > b.respawnUntil;
       if (!aCanTag && !bCanTag) continue;
+
       if (aCanTag) {
         a.tagCooldownUntil = now + RULES.tagCooldownMs;
         respawnPlayer(match, b.id, `by ${a.username}`);
@@ -242,7 +290,6 @@ function processTick(match, dt) {
         : match.scores[TEAM_BLACK] > match.scores[TEAM_WHITE]
           ? TEAM_BLACK
           : TEAM_WHITE;
-    addEvent(match, match.winner === 'draw' ? 'Match ended in draw' : `${TEAM_META[match.winner].label} wins on time`);
   }
 }
 
@@ -250,11 +297,6 @@ function onMessage(msg, fromPeerId) {
   if (!msg?.type) return;
   if (msg.type === 'disconnect') {
     statEl.status.textContent = 'Disconnected';
-    return;
-  }
-
-  if (msg.type === 'event' && msg.payload?.text) {
-    pushFeed(msg.payload.text);
     return;
   }
 
@@ -279,89 +321,152 @@ function onMessage(msg, fromPeerId) {
   }
 }
 
-function drawArena(match) {
-  const scaleX = canvas.width / ARENA.width;
-  const scaleY = canvas.height / ARENA.height;
+function createScene() {
+  render.engine = new BABYLON.Engine(canvas, true);
+  render.scene = new BABYLON.Scene(render.engine);
+  render.scene.clearColor = new BABYLON.Color4(0.06, 0.09, 0.16, 1);
 
-  function mapX(x) {
-    return x * scaleX;
-  }
-  function mapY(y) {
-    return y * scaleY;
-  }
+  const light = new BABYLON.HemisphericLight('light', new BABYLON.Vector3(0, 1, 0), render.scene);
+  light.intensity = 0.95;
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const dir = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-0.4, -1, 0.2), render.scene);
+  dir.position = new BABYLON.Vector3(30, 40, -20);
+  dir.intensity = 0.45;
 
-  // sides
-  ctx.fillStyle = '#101722';
-  ctx.fillRect(0, 0, canvas.width / 2, canvas.height);
-  ctx.fillStyle = '#1d2230';
-  ctx.fillRect(canvas.width / 2, 0, canvas.width / 2, canvas.height);
+  const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: ARENA.width, height: ARENA.depth }, render.scene);
+  const gMat = new BABYLON.StandardMaterial('ground-mat', render.scene);
+  gMat.diffuseColor = new BABYLON.Color3(0.12, 0.15, 0.24);
+  gMat.specularColor = new BABYLON.Color3(0, 0, 0);
+  ground.material = gMat;
 
-  // middle line
-  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-  ctx.lineWidth = 3;
-  ctx.setLineDash([10, 12]);
-  ctx.beginPath();
-  ctx.moveTo(canvas.width / 2, 0);
-  ctx.lineTo(canvas.width / 2, canvas.height);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  const stripe = BABYLON.MeshBuilder.CreateGround('stripe', { width: 1.5, height: ARENA.depth }, render.scene);
+  stripe.position.y = 0.01;
+  const sMat = new BABYLON.StandardMaterial('stripe-mat', render.scene);
+  sMat.diffuseColor = new BABYLON.Color3(0.75, 0.8, 1);
+  stripe.material = sMat;
 
-  // bases
-  [TEAM_BLACK, TEAM_WHITE].forEach((team) => {
-    const b = TEAM_META[team].base;
-    ctx.fillStyle = team === TEAM_BLACK ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.25)';
-    ctx.beginPath();
-    ctx.arc(mapX(b.x), mapY(b.y), 35, 0, Math.PI * 2);
-    ctx.fill();
+  obstacles.forEach((o, idx) => {
+    const box = BABYLON.MeshBuilder.CreateBox(`obs-${idx}`, { width: o.w, depth: o.d, height: o.h }, render.scene);
+    box.position = new BABYLON.Vector3(o.x, o.h / 2, o.z);
+    const mat = new BABYLON.StandardMaterial(`obs-mat-${idx}`, render.scene);
+    mat.diffuseColor = new BABYLON.Color3(0.25, 0.29, 0.42);
+    box.material = mat;
   });
 
-  // flags
-  Object.values(match.flags).forEach((flag) => {
-    ctx.fillStyle = flag.team === TEAM_BLACK ? '#111' : '#fff';
-    ctx.strokeStyle = flag.team === TEAM_BLACK ? '#fff' : '#111';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(mapX(flag.x), mapY(flag.y), ARENA.flagRadius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+  const blackBase = BABYLON.MeshBuilder.CreateCylinder('black-base', { diameter: 9, height: 0.6 }, render.scene);
+  blackBase.position = new BABYLON.Vector3(TEAM_META[TEAM_BLACK].base.x, 0.3, TEAM_META[TEAM_BLACK].base.z);
+  const blackMat = new BABYLON.StandardMaterial('black-base-mat', render.scene);
+  blackMat.diffuseColor = new BABYLON.Color3(0.09, 0.09, 0.09);
+  blackBase.material = blackMat;
 
-    ctx.fillStyle = flag.team === TEAM_BLACK ? '#fff' : '#111';
-    ctx.font = '12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(flag.team === TEAM_BLACK ? 'B' : 'W', mapX(flag.x), mapY(flag.y) + 4);
+  const whiteBase = BABYLON.MeshBuilder.CreateCylinder('white-base', { diameter: 9, height: 0.6 }, render.scene);
+  whiteBase.position = new BABYLON.Vector3(TEAM_META[TEAM_WHITE].base.x, 0.3, TEAM_META[TEAM_WHITE].base.z);
+  const whiteMat = new BABYLON.StandardMaterial('white-base-mat', render.scene);
+  whiteMat.diffuseColor = new BABYLON.Color3(0.92, 0.92, 0.92);
+  whiteBase.material = whiteMat;
+
+  render.flagMeshes.set(TEAM_BLACK, BABYLON.MeshBuilder.CreateBox('flag-black', { size: 1.6 }, render.scene));
+  render.flagMeshes.set(TEAM_WHITE, BABYLON.MeshBuilder.CreateBox('flag-white', { size: 1.6 }, render.scene));
+  const fbMat = new BABYLON.StandardMaterial('fb', render.scene);
+  fbMat.diffuseColor = new BABYLON.Color3(0.06, 0.06, 0.06);
+  render.flagMeshes.get(TEAM_BLACK).material = fbMat;
+  const fwMat = new BABYLON.StandardMaterial('fw', render.scene);
+  fwMat.diffuseColor = new BABYLON.Color3(0.95, 0.95, 0.95);
+  render.flagMeshes.get(TEAM_WHITE).material = fwMat;
+
+  render.camera = new BABYLON.UniversalCamera('cam', new BABYLON.Vector3(0, 4, -10), render.scene);
+  render.camera.fov = 1.05;
+  render.camera.minZ = 0.1;
+
+  render.adt = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI('ui', true, render.scene);
+
+  canvas.addEventListener('click', async () => {
+    await canvas.requestPointerLock?.();
+  });
+
+  document.addEventListener('pointerlockchange', () => {
+    state.pointerLocked = document.pointerLockElement === canvas;
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!state.pointerLocked) return;
+    state.inputs.yaw += e.movementX * 0.0026;
+    state.inputs.pitch = clamp(state.inputs.pitch + e.movementY * 0.0018, -1.15, 1.15);
+    sendInput();
+  });
+
+  render.engine.runRenderLoop(() => {
+    if (state.match) {
+      syncMeshes();
+      updateHud(state.match);
+    }
+    render.scene.render();
+  });
+
+  window.addEventListener('resize', () => render.engine.resize());
+}
+
+function ensurePlayerMesh(player) {
+  if (render.playerMeshes.has(player.id)) return;
+
+  const body = BABYLON.MeshBuilder.CreateCapsule(`p-${player.id}`, { radius: ARENA.playerRadius, height: ARENA.playerHeight }, render.scene);
+  const mat = new BABYLON.StandardMaterial(`pm-${player.id}`, render.scene);
+  mat.diffuseColor = BABYLON.Color3.FromHexString(player.color || '#4dd8ff');
+  body.material = mat;
+  render.playerMeshes.set(player.id, body);
+
+  const panel = new BABYLON.GUI.Rectangle(`tag-${player.id}`);
+  panel.background = 'rgba(0,0,0,0.45)';
+  panel.height = '28px';
+  panel.width = '130px';
+  panel.cornerRadius = 10;
+  panel.thickness = 1;
+  panel.color = 'white';
+  render.adt.addControl(panel);
+  panel.linkWithMesh(body);
+  panel.linkOffsetY = -62;
+
+  const text = new BABYLON.GUI.TextBlock(`tag-text-${player.id}`, player.username);
+  text.fontSize = 14;
+  text.color = 'white';
+  panel.addControl(text);
+
+  render.nameplates.set(player.id, panel);
+}
+
+function cleanupPlayerMesh(id) {
+  render.playerMeshes.get(id)?.dispose();
+  render.nameplates.get(id)?.dispose();
+  render.playerMeshes.delete(id);
+  render.nameplates.delete(id);
+}
+
+function syncMeshes() {
+  const match = state.match;
+  const ids = new Set(Object.keys(match.players));
+
+  render.playerMeshes.forEach((_, id) => {
+    if (!ids.has(id)) cleanupPlayerMesh(id);
   });
 
   Object.values(match.players).forEach((p) => {
-    const invuln = Date.now() < p.respawnUntil;
-    ctx.globalAlpha = invuln ? 0.5 : 1;
-    ctx.fillStyle = p.color;
-    ctx.beginPath();
-    ctx.arc(mapX(p.x), mapY(p.y), ARENA.playerRadius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = p.team === TEAM_BLACK ? '#fff' : '#111';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    ensurePlayerMesh(p);
+    const mesh = render.playerMeshes.get(p.id);
+    mesh.position.set(p.x, p.y, p.z);
+    mesh.rotation.y = p.yaw;
+    mesh.material.diffuseColor = BABYLON.Color3.FromHexString(p.color || '#4dd8ff');
 
     if (p.id === state.mePeerId) {
-      ctx.strokeStyle = '#4dd8ff';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(mapX(p.x), mapY(p.y), ARENA.playerRadius + 6, 0, Math.PI * 2);
-      ctx.stroke();
+      const eye = new BABYLON.Vector3(p.x, p.y + 1.35, p.z);
+      const forward = new BABYLON.Vector3(Math.sin(state.inputs.yaw), -state.inputs.pitch * 0.6, Math.cos(state.inputs.yaw));
+      render.camera.position = eye;
+      render.camera.setTarget(eye.add(forward));
     }
+  });
 
-    if (p.carryingFlagOf) {
-      ctx.fillStyle = '#ffd43b';
-      ctx.fillRect(mapX(p.x) - 4, mapY(p.y) - 32, 8, 14);
-    }
-
-    ctx.fillStyle = '#e6edff';
-    ctx.font = '12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(p.username, mapX(p.x), mapY(p.y) - 24);
-    ctx.globalAlpha = 1;
+  Object.values(match.flags).forEach((flag) => {
+    const mesh = render.flagMeshes.get(flag.team);
+    mesh.position.set(flag.x, flag.y + 0.9, flag.z);
   });
 }
 
@@ -385,22 +490,25 @@ function updateHud(match) {
       : 'Connected';
   statEl.status.textContent = status;
 
-  const latest = match.events.slice(0, 8).map((e) => `<div>${new Date(e.t).toLocaleTimeString()} - ${e.text}</div>`).join('');
+  const latest = match.events
+    .slice(0, 8)
+    .map((e) => `<div>${new Date(e.t).toLocaleTimeString()} - ${e.text}</div>`)
+    .join('');
   statEl.feed.innerHTML = latest || '<div class="small">No events yet.</div>';
 }
 
-function sendInputIfClient() {
-  if (role !== 'host') {
-    net.sendToHost({ type: 'input', payload: state.inputs, seq: ++state.seq });
-  }
+function setInput(key, pressed) {
+  if (key === 'w') state.inputs.forward = pressed;
+  if (key === 's') state.inputs.back = pressed;
+  if (key === 'a') state.inputs.left = pressed;
+  if (key === 'd') state.inputs.right = pressed;
+  if (key === ' ') state.inputs.jump = pressed;
+  sendInput();
 }
 
-function setInput(key, pressed) {
-  if (key === 'w' || key === 'arrowup') state.inputs.up = pressed;
-  if (key === 's' || key === 'arrowdown') state.inputs.down = pressed;
-  if (key === 'a' || key === 'arrowleft') state.inputs.left = pressed;
-  if (key === 'd' || key === 'arrowright') state.inputs.right = pressed;
-  sendInputIfClient();
+function sendInput() {
+  if (role === 'host') return;
+  net.sendToHost({ type: 'input', payload: state.inputs, seq: ++state.seq });
 }
 
 window.addEventListener('keydown', (e) => setInput(e.key.toLowerCase(), true));
@@ -408,12 +516,7 @@ window.addEventListener('keyup', (e) => setInput(e.key.toLowerCase(), false));
 window.addEventListener('beforeunload', () => net.close());
 
 async function start() {
-  canvas.width = canvas.clientWidth;
-  canvas.height = canvas.clientHeight;
-  window.addEventListener('resize', () => {
-    canvas.width = canvas.clientWidth;
-    canvas.height = canvas.clientHeight;
-  });
+  createScene();
 
   try {
     if (role === 'host') {
@@ -422,14 +525,11 @@ async function start() {
       state.match = createMatch(state.mePeerId);
       addPlayer(state.match, state.mePeerId, profile.username, profile.color, TEAM_BLACK);
       addEvent(state.match, `${profile.username} is hosting room ${room}`);
-      net.broadcast({ type: 'event', payload: { text: 'Host online' } });
     } else {
       await net.join(room);
       state.mePeerId = net.peer.id;
-      net.sendToHost({
-        type: 'join-request',
-        payload: { username: profile.username, color: profile.color }
-      });
+      net.sendToHost({ type: 'join-request', payload: { username: profile.username, color: profile.color } });
+      setInterval(sendInput, 50);
     }
   } catch (err) {
     errorEl.textContent = `Network error: ${err.message}`;
@@ -437,33 +537,28 @@ async function start() {
   }
 
   let last = performance.now();
-  let accumulator = 0;
+  let accum = 0;
   const step = 1 / RULES.tickRate;
 
-  function frame(now) {
+  const hostLoop = () => {
+    if (!state.match || role !== 'host') return;
+    const me = state.match.players[state.mePeerId];
+    if (me) me.input = state.inputs;
+
+    const now = performance.now();
     const dt = (now - last) / 1000;
     last = now;
+    accum += dt;
 
-    if (role === 'host' && state.match) {
-      const me = state.match.players[state.mePeerId];
-      if (me) me.input = state.inputs;
-      accumulator += dt;
-      while (accumulator >= step) {
-        processTick(state.match, step);
-        accumulator -= step;
-      }
-      net.broadcast({ type: 'state', payload: state.match });
+    while (accum >= step) {
+      processTick(state.match, step);
+      accum -= step;
     }
 
-    if (state.match) {
-      drawArena(state.match);
-      updateHud(state.match);
-    }
+    net.broadcast({ type: 'state', payload: state.match });
+  };
 
-    requestAnimationFrame(frame);
-  }
-
-  requestAnimationFrame(frame);
+  setInterval(hostLoop, 1000 / RULES.tickRate);
 }
 
 start();
