@@ -42,17 +42,16 @@ const obstacles = [
 const state = {
   mePeerId: null,
   match: null,
+  localPlayer: null,
   inputs: { forward: false, back: false, left: false, right: false, jump: false, yaw: 0, pitch: 0 },
-  seq: 0,
   pointerLocked: false,
   connectedPlayers: 1,
-  pendingInputs: [],
-  predictedMe: null,
-  lastFrameMs: performance.now()
+  lastFrameMs: performance.now(),
+  lastPoseSentAt: 0
 };
 
 const security = {
-  peers: new Map() // peerId -> {lastSeq,lastMsgAt,strikes}
+  peers: new Map() // peerId -> {lastPoseAt,lastX,lastY,lastZ,strikes}
 };
 
 const render = {
@@ -122,9 +121,7 @@ function newPlayerState(id, username, color, team) {
     pitch: 0,
     tagCooldownUntil: 0,
     respawnUntil: Date.now() + 600,
-    carryingFlagOf: null,
-    input: { forward: false, back: false, left: false, right: false, jump: false, yaw: 0, pitch: 0 },
-    inputSeq: 0
+    carryingFlagOf: null
   };
 }
 
@@ -185,12 +182,13 @@ function obstacleCollision(nx, nz, radius) {
   return obstacles.some((o) => nx + radius > o.x - o.w / 2 && nx - radius < o.x + o.w / 2 && nz + radius > o.z - o.d / 2 && nz - radius < o.z + o.d / 2);
 }
 
-function simulatePlayer(player, input, dt) {
-  player.yaw = input.yaw;
-  player.pitch = input.pitch;
+function simulateLocalPlayer(player, dt) {
+  if (!player) return;
+  player.yaw = state.inputs.yaw;
+  player.pitch = state.inputs.pitch;
 
-  const forward = (input.forward ? 1 : 0) - (input.back ? 1 : 0);
-  const strafe = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+  const forward = (state.inputs.forward ? 1 : 0) - (state.inputs.back ? 1 : 0);
+  const strafe = (state.inputs.right ? 1 : 0) - (state.inputs.left ? 1 : 0);
   const sin = Math.sin(player.yaw);
   const cos = Math.cos(player.yaw);
   const worldX = forward * sin + strafe * cos;
@@ -207,7 +205,7 @@ function simulatePlayer(player, input, dt) {
   if (!obstacleCollision(nextX, player.z, ARENA.playerRadius)) player.x = nextX;
   if (!obstacleCollision(player.x, nextZ, ARENA.playerRadius)) player.z = nextZ;
 
-  if (input.jump && player.onGround) {
+  if (state.inputs.jump && player.onGround) {
     player.vy = RULES.jumpVelocity;
     player.onGround = false;
   }
@@ -222,9 +220,12 @@ function simulatePlayer(player, input, dt) {
   }
 }
 
-function processTick(match, dt) {
+function isVulnerableOnEnemySide(player) {
+  return player.team === TEAM_BLACK ? player.x > 0 : player.x < 0;
+}
+
+function processTick(match) {
   const now = Date.now();
-  Object.values(match.players).forEach((p) => simulatePlayer(p, p.input, dt));
 
   Object.values(match.flags).forEach((flag) => {
     if (flag.holderId && match.players[flag.holderId]) {
@@ -277,10 +278,11 @@ function processTick(match, dt) {
       const bCanTag = now > b.tagCooldownUntil && now > b.respawnUntil;
       if (!aCanTag && !bCanTag) continue;
 
-      if (aCanTag) {
+      // Territory logic: black is only taggable on white side (x > 0), white only on black side (x < 0)
+      if (aCanTag && isVulnerableOnEnemySide(b)) {
         a.tagCooldownUntil = now + RULES.tagCooldownMs;
         respawnPlayer(match, b.id, `by ${a.username}`);
-      } else if (bCanTag) {
+      } else if (bCanTag && isVulnerableOnEnemySide(a)) {
         b.tagCooldownUntil = now + RULES.tagCooldownMs;
         respawnPlayer(match, a.id, `by ${b.username}`);
       }
@@ -297,58 +299,69 @@ function processTick(match, dt) {
   }
 }
 
-function sanitizeInput(raw) {
-  const input = raw || {};
+function sanitizePose(raw) {
+  const p = raw || {};
   return {
-    forward: !!input.forward,
-    back: !!input.back,
-    left: !!input.left,
-    right: !!input.right,
-    jump: !!input.jump,
-    yaw: Number.isFinite(input.yaw) ? input.yaw : 0,
-    pitch: clamp(Number.isFinite(input.pitch) ? input.pitch : 0, -1.2, 1.2)
+    x: Number.isFinite(p.x) ? p.x : 0,
+    y: Number.isFinite(p.y) ? p.y : ARENA.floorY,
+    z: Number.isFinite(p.z) ? p.z : 0,
+    vy: Number.isFinite(p.vy) ? p.vy : 0,
+    onGround: !!p.onGround,
+    yaw: Number.isFinite(p.yaw) ? p.yaw : 0,
+    pitch: clamp(Number.isFinite(p.pitch) ? p.pitch : 0, -1.2, 1.2)
   };
 }
 
-function acceptInput(peerId, seq, input) {
+function acceptPose(peerId, payload) {
   const now = Date.now();
-  const track = security.peers.get(peerId) || { lastSeq: 0, lastMsgAt: 0, strikes: 0 };
+  const pose = sanitizePose(payload);
+  const track = security.peers.get(peerId) || { lastPoseAt: now, lastX: pose.x, lastY: pose.y, lastZ: pose.z, strikes: 0 };
 
-  if (seq <= track.lastSeq) return null;
+  const dt = Math.max(0.016, (now - track.lastPoseAt) / 1000);
+  const dx = pose.x - track.lastX;
+  const dy = pose.y - track.lastY;
+  const dz = pose.z - track.lastZ;
+  const distance = Math.hypot(dx, dy, dz);
+  const maxDistance = RULES.moveSpeed * dt * 1.6 + 2.5;
 
-  const deltaMs = now - track.lastMsgAt;
-  if (deltaMs < 10) {
+  if (distance > maxDistance) {
     track.strikes += 1;
   } else {
     track.strikes = Math.max(0, track.strikes - 1);
   }
 
-  track.lastSeq = seq;
-  track.lastMsgAt = now;
+  track.lastPoseAt = now;
+  track.lastX = pose.x;
+  track.lastY = pose.y;
+  track.lastZ = pose.z;
   security.peers.set(peerId, track);
 
-  if (track.strikes > 30) return null;
-  return sanitizeInput(input);
+  if (track.strikes > 18) return null;
+
+  pose.x = clamp(pose.x, -ARENA.width / 2 + ARENA.playerRadius, ARENA.width / 2 - ARENA.playerRadius);
+  pose.z = clamp(pose.z, -ARENA.depth / 2 + ARENA.playerRadius, ARENA.depth / 2 - ARENA.playerRadius);
+  pose.y = clamp(pose.y, ARENA.floorY, ARENA.floorY + 20);
+  return pose;
 }
 
 function applyIncomingState(payload) {
   state.match = payload;
+  const me = payload?.players?.[state.mePeerId];
+  if (!me) return;
 
-  if (role === 'client') {
-    const me = payload?.players?.[state.mePeerId];
-    if (!me) return;
+  if (!state.localPlayer) {
+    state.localPlayer = structuredClone(me);
+    return;
+  }
 
-    if (!state.predictedMe) {
-      state.predictedMe = structuredClone(me);
-    }
+  // Preserve client-side movement, but accept server corrections for hard state changes.
+  const snapNeeded = Math.hypot(state.localPlayer.x - me.x, state.localPlayer.y - me.y, state.localPlayer.z - me.z) > 6 || me.respawnUntil > state.localPlayer.respawnUntil;
+  if (role === 'client' && snapNeeded) {
+    state.localPlayer = structuredClone(me);
+  }
 
-    const ackSeq = me.inputSeq || 0;
-    state.pendingInputs = state.pendingInputs.filter((entry) => entry.seq > ackSeq);
-
-    state.predictedMe = structuredClone(me);
-    for (const pending of state.pendingInputs) {
-      simulatePlayer(state.predictedMe, pending.input, 1 / RULES.tickRate);
-    }
+  if (role === 'host') {
+    state.localPlayer = structuredClone(me);
   }
 }
 
@@ -368,15 +381,19 @@ function onMessage(msg, fromPeerId) {
     addEvent(match, `${msg.payload.username} joined`);
   }
 
-  if (msg.type === 'input') {
+  if (msg.type === 'pose') {
     const player = match.players[fromPeerId];
     if (!player) return;
+    const pose = acceptPose(fromPeerId, msg.payload);
+    if (!pose) return;
 
-    const clean = acceptInput(fromPeerId, Number(msg.seq || 0), msg.payload);
-    if (!clean) return;
-
-    player.input = clean;
-    player.inputSeq = Number(msg.seq || player.inputSeq || 0);
+    player.x = pose.x;
+    player.y = pose.y;
+    player.z = pose.z;
+    player.vy = pose.vy;
+    player.onGround = pose.onGround;
+    player.yaw = pose.yaw;
+    player.pitch = pose.pitch;
   }
 
   if (msg.type === 'peer-left') {
@@ -458,7 +475,6 @@ function createScene() {
     if (!state.pointerLocked) return;
     state.inputs.yaw += e.movementX * 0.0026;
     state.inputs.pitch = clamp(state.inputs.pitch + e.movementY * 0.0018, -1.15, 1.15);
-    pushInput();
   });
 
   render.engine.runRenderLoop(() => {
@@ -466,19 +482,52 @@ function createScene() {
     const dt = Math.min(0.05, (now - state.lastFrameMs) / 1000);
     state.lastFrameMs = now;
 
-    if (role === 'client' && state.predictedMe) {
-      simulatePlayer(state.predictedMe, state.inputs, dt);
-    }
+    simulateLocalPlayer(state.localPlayer, dt);
+    syncLocalToMatch();
 
     if (state.match) {
       syncMeshes(dt);
       updateHud(state.match);
     }
 
+    maybeSendPose(now);
     render.scene.render();
   });
 
   window.addEventListener('resize', () => render.engine.resize());
+}
+
+function syncLocalToMatch() {
+  if (!state.match || !state.localPlayer || !state.mePeerId) return;
+  const p = state.match.players[state.mePeerId];
+  if (!p) return;
+
+  p.x = state.localPlayer.x;
+  p.y = state.localPlayer.y;
+  p.z = state.localPlayer.z;
+  p.vy = state.localPlayer.vy;
+  p.onGround = state.localPlayer.onGround;
+  p.yaw = state.localPlayer.yaw;
+  p.pitch = state.localPlayer.pitch;
+}
+
+function maybeSendPose(nowMs) {
+  if (role !== 'client' || !state.localPlayer) return;
+  if (nowMs - state.lastPoseSentAt < 90) return;
+  state.lastPoseSentAt = nowMs;
+
+  net.sendToHost({
+    type: 'pose',
+    payload: {
+      x: state.localPlayer.x,
+      y: state.localPlayer.y,
+      z: state.localPlayer.z,
+      vy: state.localPlayer.vy,
+      onGround: state.localPlayer.onGround,
+      yaw: state.localPlayer.yaw,
+      pitch: state.localPlayer.pitch
+    }
+  });
 }
 
 function ensurePlayerMesh(player) {
@@ -535,7 +584,7 @@ function syncMeshes(dt) {
     ensurePlayerMesh(auth);
     const mesh = render.playerMeshes.get(auth.id);
 
-    const target = role === 'client' && auth.id === state.mePeerId && state.predictedMe ? state.predictedMe : auth;
+    const target = auth.id === state.mePeerId && state.localPlayer ? state.localPlayer : auth;
 
     let interp = render.interpolatedPlayers.get(auth.id);
     if (!interp) {
@@ -543,7 +592,7 @@ function syncMeshes(dt) {
       render.interpolatedPlayers.set(auth.id, interp);
     }
 
-    if (role === 'client' && auth.id === state.mePeerId) {
+    if (auth.id === state.mePeerId) {
       interp.x = target.x;
       interp.y = target.y;
       interp.z = target.z;
@@ -606,16 +655,6 @@ function setInput(key, pressed) {
   if (key === 'a') state.inputs.left = pressed;
   if (key === 'd') state.inputs.right = pressed;
   if (key === ' ') state.inputs.jump = pressed;
-  pushInput();
-}
-
-function pushInput() {
-  if (role === 'host') return;
-  const clean = sanitizeInput(state.inputs);
-  const seq = ++state.seq;
-  state.pendingInputs.push({ seq, input: { ...clean } });
-  if (state.pendingInputs.length > 100) state.pendingInputs.shift();
-  net.sendToHost({ type: 'input', payload: clean, seq });
 }
 
 window.addEventListener('keydown', (e) => setInput(e.key.toLowerCase(), true));
@@ -631,41 +670,21 @@ async function start() {
       state.mePeerId = net.peer.id;
       state.match = createMatch(state.mePeerId);
       addPlayer(state.match, state.mePeerId, profile.username, profile.color, TEAM_BLACK);
+      state.localPlayer = structuredClone(state.match.players[state.mePeerId]);
       addEvent(state.match, `${profile.username} is hosting room ${room}`);
     } else {
       await net.join(room);
       state.mePeerId = net.peer.id;
       net.sendToHost({ type: 'join-request', payload: { username: profile.username, color: profile.color } });
-      setInterval(pushInput, 50);
     }
   } catch (err) {
     errorEl.textContent = `Network error: ${err.message}`;
     return;
   }
 
-  let last = performance.now();
-  let accum = 0;
-  const step = 1 / RULES.tickRate;
-
   const hostLoop = () => {
     if (!state.match || role !== 'host') return;
-
-    const me = state.match.players[state.mePeerId];
-    if (me) {
-      me.input = sanitizeInput(state.inputs);
-      me.inputSeq = state.seq;
-    }
-
-    const now = performance.now();
-    const dt = (now - last) / 1000;
-    last = now;
-    accum += dt;
-
-    while (accum >= step) {
-      processTick(state.match, step);
-      accum -= step;
-    }
-
+    processTick(state.match);
     net.broadcast({ type: 'state', payload: state.match });
   };
 
