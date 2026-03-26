@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CTF Setup - Join or Host</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="card">
+        <h1>Join Match</h1>
+        <p class="note">Step 2 / 3: Enter your username and room code.</p>
+
+        <div class="grid">
+          <label for="nameInput">Username (3-16 chars)</label>
+          <input id="nameInput" maxlength="16" placeholder="Player_One" />
+
+          <label for="codeInput">Room code (6 digits)</label>
+          <input id="codeInput" maxlength="6" placeholder="123456" inputmode="numeric" />
+
+          <div id="error"></div>
+
+          <div class="grid cols-2">
+            <button id="hostBtn">Host New Room</button>
+            <button id="joinBtn" class="secondary">Join Existing Room</button>
+          </div>
+          <button id="backBtn" class="secondary">Back</button>
+        </div>
+      </section>
+    </main>
+
+    <script type="module">
+      import { isValidCode, isValidUsername, loadProfile, randomCode, saveProfile } from './src/common.js';
+
+      const nameInput = document.getElementById('nameInput');
+      const codeInput = document.getElementById('codeInput');
+      const errorEl = document.getElementById('error');
+      const hostBtn = document.getElementById('hostBtn');
+      const joinBtn = document.getElementById('joinBtn');
+      const backBtn = document.getElementById('backBtn');
+
+      const profile = loadProfile();
+      nameInput.value = profile.username || '';
+      codeInput.value = profile.roomCode || '';
+
+      function validateBase() {
+        const name = nameInput.value.trim();
+        if (!isValidUsername(name)) {
+          return 'Username must be 3-16 chars (letters, numbers, spaces, _ or -).';
+        }
+        return '';
+      }
+
+      function go(role, code) {
+        const name = nameInput.value.trim();
+        const baseErr = validateBase();
+        if (baseErr) {
+          errorEl.textContent = baseErr;
+          return;
+        }
+        if (!isValidCode(code)) {
+          errorEl.textContent = 'Room code must be exactly 6 digits.';
+          return;
+        }
+
+        saveProfile({ username: name, roomCode: code, role });
+        location.href = `./game.html?room=${encodeURIComponent(code)}&role=${encodeURIComponent(role)}`;
+      }
+
+      hostBtn.addEventListener('click', () => {
+        const code = randomCode();
+        codeInput.value = code;
+        go('host', code);
+      });
+
+      joinBtn.addEventListener('click', () => go('client', codeInput.value.trim()));
+      backBtn.addEventListener('click', () => (location.href = './color.html'));
+      codeInput.addEventListener('input', () => {
+        codeInput.value = codeInput.value.replace(/\D/g, '').slice(0, 6);
+      });
+    </script>
+  </body>
+</html>
