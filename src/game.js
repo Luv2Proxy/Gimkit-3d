@@ -31,12 +31,12 @@ const role = params.get('role') || profile.role;
 if (!room || !role || !profile.username) location.href = './join.html';
 
 const obstacles = [
-  { x: -20, z: -20, w: 8, d: 8, h: 3 },
-  { x: 10, z: 16, w: 12, d: 6, h: 3 },
-  { x: 0, z: 0, w: 7, d: 22, h: 4 },
-  { x: -42, z: 19, w: 10, d: 8, h: 3 },
-  { x: 37, z: -16, w: 9, d: 10, h: 4 },
-  { x: 28, z: 30, w: 7, d: 7, h: 5 }
+  { x: -20, z: -20, w: 8, d: 8, h: 3, rotX: 0.2, rotY: 0.3, rotZ: 0.1, color: [0.8, 0.3, 0.3] },
+  { x: 10, z: 16, w: 12, d: 6, h: 3, rotX: 0.0, rotY: 1.2, rotZ: 0.4, color: [0.3, 0.8, 0.4] },
+  { x: 0, z: 0, w: 7, d: 22, h: 4, rotX: 0.5, rotY: 0.6, rotZ: 0.2, color: [0.3, 0.5, 0.9] },
+  { x: -42, z: 19, w: 10, d: 8, h: 3, rotX: 0.1, rotY: 2.0, rotZ: 0.3, color: [0.9, 0.8, 0.3] },
+  { x: 37, z: -16, w: 9, d: 10, h: 4, rotX: 0.3, rotY: 0.9, rotZ: 0.6, color: [0.6, 0.3, 0.8] },
+  { x: 28, z: 30, w: 7, d: 7, h: 5, rotX: 0.7, rotY: 1.5, rotZ: 0.2, color: [0.2, 0.9, 0.9] }
 ];
 
 const state = {
@@ -430,11 +430,29 @@ function createScene() {
   stripe.material = sMat;
 
   obstacles.forEach((o, idx) => {
-    const box = BABYLON.MeshBuilder.CreateBox(`obs-${idx}`, { width: o.w, depth: o.d, height: o.h }, render.scene);
+    const box = BABYLON.MeshBuilder.CreateBox(
+      `obs-${idx}`,
+      { width: o.w, depth: o.d, height: o.h },
+      render.scene
+    );
+  
+    // Position
     box.position = new BABYLON.Vector3(o.x, o.h / 2, o.z);
+  
+    // Rotation on ALL axes
+    box.rotation = new BABYLON.Vector3(
+      o.rotX || 0,
+      o.rotY || 0,
+      o.rotZ || 0
+    );
+  
+    // Material + color
     const mat = new BABYLON.StandardMaterial(`obs-mat-${idx}`, render.scene);
-    mat.diffuseColor = new BABYLON.Color3(0.25, 0.29, 0.42);
+    const c = o.color || [0.25, 0.29, 0.42];
+    mat.diffuseColor = new BABYLON.Color3(c[0], c[1], c[2]);
+  
     box.material = mat;
+  
     render.obstacleMeshes.push(box);
   });
 
