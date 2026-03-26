@@ -45,7 +45,14 @@ const state = {
   inputs: { forward: false, back: false, left: false, right: false, jump: false, yaw: 0, pitch: 0 },
   seq: 0,
   pointerLocked: false,
-  connectedPlayers: 1
+  connectedPlayers: 1,
+  pendingInputs: [],
+  predictedMe: null,
+  lastFrameMs: performance.now()
+};
+
+const security = {
+  peers: new Map() // peerId -> {lastSeq,lastMsgAt,strikes}
 };
 
 const render = {
@@ -55,26 +62,18 @@ const render = {
   adt: null,
   playerMeshes: new Map(),
   nameplates: new Map(),
-  flagMeshes: new Map()
+  flagMeshes: new Map(),
+  interpolatedPlayers: new Map()
 };
 
 const net = new NetClient({
-  onState: (payload) => {
-    state.match = payload;
-  },
+  onState: (payload) => applyIncomingState(payload),
   onEvent: (msg, from) => onMessage(msg, from),
   onPeerChange: (count) => {
     state.connectedPlayers = count;
     statEl.peers.textContent = String(count);
   }
 });
-
-function pushFeed(text) {
-  const line = document.createElement('div');
-  line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
-  statEl.feed.prepend(line);
-  while (statEl.feed.children.length > 35) statEl.feed.removeChild(statEl.feed.lastChild);
-}
 
 function mkFlags() {
   return {
@@ -107,10 +106,9 @@ function spawnFor(team) {
   return { x: base.x, y: base.y, z: base.z };
 }
 
-function addPlayer(match, id, username, color, forcedTeam = null) {
-  const team = forcedTeam || assignTeam(match);
+function newPlayerState(id, username, color, team) {
   const spawn = spawnFor(team);
-  match.players[id] = {
+  return {
     id,
     username,
     color,
@@ -125,8 +123,14 @@ function addPlayer(match, id, username, color, forcedTeam = null) {
     tagCooldownUntil: 0,
     respawnUntil: Date.now() + 600,
     carryingFlagOf: null,
-    input: { forward: false, back: false, left: false, right: false, jump: false, yaw: 0, pitch: 0 }
+    input: { forward: false, back: false, left: false, right: false, jump: false, yaw: 0, pitch: 0 },
+    inputSeq: 0
   };
+}
+
+function addPlayer(match, id, username, color, forcedTeam = null) {
+  const team = forcedTeam || assignTeam(match);
+  match.players[id] = newPlayerState(id, username, color, team);
 }
 
 function dropFlag(match, playerId, resetToBase = false) {
@@ -155,6 +159,7 @@ function removePlayer(match, id) {
   if (!match.players[id]) return;
   dropFlag(match, id, true);
   delete match.players[id];
+  security.peers.delete(id);
 }
 
 function addEvent(match, text) {
@@ -180,13 +185,12 @@ function obstacleCollision(nx, nz, radius) {
   return obstacles.some((o) => nx + radius > o.x - o.w / 2 && nx - radius < o.x + o.w / 2 && nz + radius > o.z - o.d / 2 && nz - radius < o.z + o.d / 2);
 }
 
-function processMovement(player, dt) {
-  player.yaw = player.input.yaw;
-  player.pitch = player.input.pitch;
+function simulatePlayer(player, input, dt) {
+  player.yaw = input.yaw;
+  player.pitch = input.pitch;
 
-  const forward = (player.input.forward ? 1 : 0) - (player.input.back ? 1 : 0);
-  const strafe = (player.input.right ? 1 : 0) - (player.input.left ? 1 : 0);
-
+  const forward = (input.forward ? 1 : 0) - (input.back ? 1 : 0);
+  const strafe = (input.right ? 1 : 0) - (input.left ? 1 : 0);
   const sin = Math.sin(player.yaw);
   const cos = Math.cos(player.yaw);
   const worldX = forward * sin + strafe * cos;
@@ -197,13 +201,13 @@ function processMovement(player, dt) {
   const moveX = (worldX / mag) * speed * dt;
   const moveZ = (worldZ / mag) * speed * dt;
 
-  let nextX = clamp(player.x + moveX, -ARENA.width / 2 + ARENA.playerRadius, ARENA.width / 2 - ARENA.playerRadius);
-  let nextZ = clamp(player.z + moveZ, -ARENA.depth / 2 + ARENA.playerRadius, ARENA.depth / 2 - ARENA.playerRadius);
+  const nextX = clamp(player.x + moveX, -ARENA.width / 2 + ARENA.playerRadius, ARENA.width / 2 - ARENA.playerRadius);
+  const nextZ = clamp(player.z + moveZ, -ARENA.depth / 2 + ARENA.playerRadius, ARENA.depth / 2 - ARENA.playerRadius);
 
   if (!obstacleCollision(nextX, player.z, ARENA.playerRadius)) player.x = nextX;
   if (!obstacleCollision(player.x, nextZ, ARENA.playerRadius)) player.z = nextZ;
 
-  if (player.input.jump && player.onGround) {
+  if (input.jump && player.onGround) {
     player.vy = RULES.jumpVelocity;
     player.onGround = false;
   }
@@ -220,7 +224,7 @@ function processMovement(player, dt) {
 
 function processTick(match, dt) {
   const now = Date.now();
-  Object.values(match.players).forEach((p) => processMovement(p, dt));
+  Object.values(match.players).forEach((p) => simulatePlayer(p, p.input, dt));
 
   Object.values(match.flags).forEach((flag) => {
     if (flag.holderId && match.players[flag.holderId]) {
@@ -293,6 +297,61 @@ function processTick(match, dt) {
   }
 }
 
+function sanitizeInput(raw) {
+  const input = raw || {};
+  return {
+    forward: !!input.forward,
+    back: !!input.back,
+    left: !!input.left,
+    right: !!input.right,
+    jump: !!input.jump,
+    yaw: Number.isFinite(input.yaw) ? input.yaw : 0,
+    pitch: clamp(Number.isFinite(input.pitch) ? input.pitch : 0, -1.2, 1.2)
+  };
+}
+
+function acceptInput(peerId, seq, input) {
+  const now = Date.now();
+  const track = security.peers.get(peerId) || { lastSeq: 0, lastMsgAt: 0, strikes: 0 };
+
+  if (seq <= track.lastSeq) return null;
+
+  const deltaMs = now - track.lastMsgAt;
+  if (deltaMs < 10) {
+    track.strikes += 1;
+  } else {
+    track.strikes = Math.max(0, track.strikes - 1);
+  }
+
+  track.lastSeq = seq;
+  track.lastMsgAt = now;
+  security.peers.set(peerId, track);
+
+  if (track.strikes > 30) return null;
+  return sanitizeInput(input);
+}
+
+function applyIncomingState(payload) {
+  state.match = payload;
+
+  if (role === 'client') {
+    const me = payload?.players?.[state.mePeerId];
+    if (!me) return;
+
+    if (!state.predictedMe) {
+      state.predictedMe = structuredClone(me);
+    }
+
+    const ackSeq = me.inputSeq || 0;
+    state.pendingInputs = state.pendingInputs.filter((entry) => entry.seq > ackSeq);
+
+    state.predictedMe = structuredClone(me);
+    for (const pending of state.pendingInputs) {
+      simulatePlayer(state.predictedMe, pending.input, 1 / RULES.tickRate);
+    }
+  }
+}
+
 function onMessage(msg, fromPeerId) {
   if (!msg?.type) return;
   if (msg.type === 'disconnect') {
@@ -311,7 +370,13 @@ function onMessage(msg, fromPeerId) {
 
   if (msg.type === 'input') {
     const player = match.players[fromPeerId];
-    if (player) player.input = msg.payload;
+    if (!player) return;
+
+    const clean = acceptInput(fromPeerId, Number(msg.seq || 0), msg.payload);
+    if (!clean) return;
+
+    player.input = clean;
+    player.inputSeq = Number(msg.seq || player.inputSeq || 0);
   }
 
   if (msg.type === 'peer-left') {
@@ -367,6 +432,7 @@ function createScene() {
 
   render.flagMeshes.set(TEAM_BLACK, BABYLON.MeshBuilder.CreateBox('flag-black', { size: 1.6 }, render.scene));
   render.flagMeshes.set(TEAM_WHITE, BABYLON.MeshBuilder.CreateBox('flag-white', { size: 1.6 }, render.scene));
+
   const fbMat = new BABYLON.StandardMaterial('fb', render.scene);
   fbMat.diffuseColor = new BABYLON.Color3(0.06, 0.06, 0.06);
   render.flagMeshes.get(TEAM_BLACK).material = fbMat;
@@ -392,14 +458,23 @@ function createScene() {
     if (!state.pointerLocked) return;
     state.inputs.yaw += e.movementX * 0.0026;
     state.inputs.pitch = clamp(state.inputs.pitch + e.movementY * 0.0018, -1.15, 1.15);
-    sendInput();
+    pushInput();
   });
 
   render.engine.runRenderLoop(() => {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - state.lastFrameMs) / 1000);
+    state.lastFrameMs = now;
+
+    if (role === 'client' && state.predictedMe) {
+      simulatePlayer(state.predictedMe, state.inputs, dt);
+    }
+
     if (state.match) {
-      syncMeshes();
+      syncMeshes(dt);
       updateHud(state.match);
     }
+
     render.scene.render();
   });
 
@@ -439,9 +514,14 @@ function cleanupPlayerMesh(id) {
   render.nameplates.get(id)?.dispose();
   render.playerMeshes.delete(id);
   render.nameplates.delete(id);
+  render.interpolatedPlayers.delete(id);
 }
 
-function syncMeshes() {
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function syncMeshes(dt) {
   const match = state.match;
   const ids = new Set(Object.keys(match.players));
 
@@ -449,15 +529,38 @@ function syncMeshes() {
     if (!ids.has(id)) cleanupPlayerMesh(id);
   });
 
-  Object.values(match.players).forEach((p) => {
-    ensurePlayerMesh(p);
-    const mesh = render.playerMeshes.get(p.id);
-    mesh.position.set(p.x, p.y, p.z);
-    mesh.rotation.y = p.yaw;
-    mesh.material.diffuseColor = BABYLON.Color3.FromHexString(p.color || '#4dd8ff');
+  const smoothing = clamp(dt * 12, 0.08, 0.3);
 
-    if (p.id === state.mePeerId) {
-      const eye = new BABYLON.Vector3(p.x, p.y + 1.35, p.z);
+  Object.values(match.players).forEach((auth) => {
+    ensurePlayerMesh(auth);
+    const mesh = render.playerMeshes.get(auth.id);
+
+    const target = role === 'client' && auth.id === state.mePeerId && state.predictedMe ? state.predictedMe : auth;
+
+    let interp = render.interpolatedPlayers.get(auth.id);
+    if (!interp) {
+      interp = { x: target.x, y: target.y, z: target.z, yaw: target.yaw };
+      render.interpolatedPlayers.set(auth.id, interp);
+    }
+
+    if (role === 'client' && auth.id === state.mePeerId) {
+      interp.x = target.x;
+      interp.y = target.y;
+      interp.z = target.z;
+      interp.yaw = target.yaw;
+    } else {
+      interp.x = lerp(interp.x, target.x, smoothing);
+      interp.y = lerp(interp.y, target.y, smoothing);
+      interp.z = lerp(interp.z, target.z, smoothing);
+      interp.yaw = lerp(interp.yaw, target.yaw, smoothing);
+    }
+
+    mesh.position.set(interp.x, interp.y, interp.z);
+    mesh.rotation.y = interp.yaw;
+    mesh.material.diffuseColor = BABYLON.Color3.FromHexString(auth.color || '#4dd8ff');
+
+    if (auth.id === state.mePeerId) {
+      const eye = new BABYLON.Vector3(interp.x, interp.y + 1.35, interp.z);
       const forward = new BABYLON.Vector3(Math.sin(state.inputs.yaw), -state.inputs.pitch * 0.6, Math.cos(state.inputs.yaw));
       render.camera.position = eye;
       render.camera.setTarget(eye.add(forward));
@@ -503,12 +606,16 @@ function setInput(key, pressed) {
   if (key === 'a') state.inputs.left = pressed;
   if (key === 'd') state.inputs.right = pressed;
   if (key === ' ') state.inputs.jump = pressed;
-  sendInput();
+  pushInput();
 }
 
-function sendInput() {
+function pushInput() {
   if (role === 'host') return;
-  net.sendToHost({ type: 'input', payload: state.inputs, seq: ++state.seq });
+  const clean = sanitizeInput(state.inputs);
+  const seq = ++state.seq;
+  state.pendingInputs.push({ seq, input: { ...clean } });
+  if (state.pendingInputs.length > 100) state.pendingInputs.shift();
+  net.sendToHost({ type: 'input', payload: clean, seq });
 }
 
 window.addEventListener('keydown', (e) => setInput(e.key.toLowerCase(), true));
@@ -529,7 +636,7 @@ async function start() {
       await net.join(room);
       state.mePeerId = net.peer.id;
       net.sendToHost({ type: 'join-request', payload: { username: profile.username, color: profile.color } });
-      setInterval(sendInput, 50);
+      setInterval(pushInput, 50);
     }
   } catch (err) {
     errorEl.textContent = `Network error: ${err.message}`;
@@ -542,8 +649,12 @@ async function start() {
 
   const hostLoop = () => {
     if (!state.match || role !== 'host') return;
+
     const me = state.match.players[state.mePeerId];
-    if (me) me.input = state.inputs;
+    if (me) {
+      me.input = sanitizeInput(state.inputs);
+      me.inputSeq = state.seq;
+    }
 
     const now = performance.now();
     const dt = (now - last) / 1000;
