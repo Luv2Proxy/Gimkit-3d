@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CTF 3D Game</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <main class="page" style="padding:18px;">
+      <section id="game-layout">
+        <canvas id="arena"></canvas>
+        <aside id="hud">
+          <h2>Capture The Flag 3D</h2>
+          <div id="error"></div>
+          <div class="stat"><span>Room</span><strong id="room-stat">-</strong></div>
+          <div class="stat"><span>Connected Players</span><strong id="peers-stat">1</strong></div>
+          <div class="stat"><span>You</span><strong id="me-stat">-</strong></div>
+          <div class="stat"><span>Status</span><strong id="status-stat">Loading</strong></div>
+          <div class="stat"><span>Timer</span><strong id="timer-stat">0:00</strong></div>
+          <hr />
+          <h3>Score</h3>
+          <div class="stat"><span>Black</span><strong id="black-score">0</strong></div>
+          <div class="stat"><span>White</span><strong id="white-score">0</strong></div>
+          <p class="small">Controls: Click canvas to lock mouse. WASD move, Space jump, Ctrl sprint, hold Shift to hide tags, Mouse look.</p>
+          <h3>Events</h3>
+          <div class="log" id="event-feed"></div>
+        </aside>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+    <script type="module" src="./src/game.js"></script>
+  </body>
+</html>
