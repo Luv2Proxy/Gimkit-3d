@@ -43,7 +43,7 @@ const state = {
   mePeerId: null,
   match: null,
   localPlayer: null,
-  inputs: { forward: false, back: false, left: false, right: false, jump: false, yaw: 0, pitch: 0 },
+  inputs: { forward: false, back: false, left: false, right: false, jump: false, sprint: false, hideTags: false, yaw: 0, pitch: 0 },
   pointerLocked: false,
   connectedPlayers: 1,
   lastFrameMs: performance.now(),
@@ -62,7 +62,8 @@ const render = {
   playerMeshes: new Map(),
   nameplates: new Map(),
   flagMeshes: new Map(),
-  interpolatedPlayers: new Map()
+  interpolatedPlayers: new Map(),
+  obstacleMeshes: []
 };
 
 const net = new NetClient({
@@ -195,7 +196,8 @@ function simulateLocalPlayer(player, dt) {
   const worldZ = forward * cos - strafe * sin;
   const mag = Math.hypot(worldX, worldZ) || 1;
 
-  const speed = player.carryingFlagOf ? RULES.moveSpeed * RULES.carrierSpeedMultiplier : RULES.moveSpeed;
+  let speed = player.carryingFlagOf ? RULES.moveSpeed * RULES.carrierSpeedMultiplier : RULES.moveSpeed;
+  if (state.inputs.sprint) speed *= RULES.sprintMultiplier;
   const moveX = (worldX / mag) * speed * dt;
   const moveZ = (worldZ / mag) * speed * dt;
 
@@ -433,6 +435,7 @@ function createScene() {
     const mat = new BABYLON.StandardMaterial(`obs-mat-${idx}`, render.scene);
     mat.diffuseColor = new BABYLON.Color3(0.25, 0.29, 0.42);
     box.material = mat;
+    render.obstacleMeshes.push(box);
   });
 
   const blackBase = BABYLON.MeshBuilder.CreateCylinder('black-base', { diameter: 9, height: 0.6 }, render.scene);
@@ -614,6 +617,32 @@ function syncMeshes(dt) {
       render.camera.position = eye;
       render.camera.setTarget(eye.add(forward));
     }
+
+    const panel = render.nameplates.get(auth.id);
+    if (panel) {
+      if (state.inputs.hideTags) {
+        panel.isVisible = false;
+      } else {
+        const camPos = render.camera.position;
+        const targetHead = new BABYLON.Vector3(interp.x, interp.y + 1.6, interp.z);
+        const toTarget = targetHead.subtract(camPos);
+        const distance = toTarget.length();
+        const dir = toTarget.normalize();
+        const ray = new BABYLON.Ray(camPos, dir, distance);
+        const hit = render.scene.pickWithRay(ray, (m) => render.obstacleMeshes.includes(m), false);
+        const blocked = !!(hit && hit.hit && hit.distance < distance - 0.3);
+        panel.isVisible = !blocked;
+
+        const fadeStart = 12;
+        const fadeEnd = 70;
+        const t = clamp((distance - fadeStart) / (fadeEnd - fadeStart), 0, 1);
+        const alpha = 1 - t * 0.82;
+        panel.alpha = alpha;
+        const scale = 1 - t * 0.45;
+        panel.scaleX = scale;
+        panel.scaleY = scale;
+      }
+    }
   });
 
   Object.values(match.flags).forEach((flag) => {
@@ -655,6 +684,8 @@ function setInput(key, pressed) {
   if (key === 'a') state.inputs.left = pressed;
   if (key === 'd') state.inputs.right = pressed;
   if (key === ' ') state.inputs.jump = pressed;
+  if (key === 'control') state.inputs.sprint = pressed;
+  if (key === 'shift') state.inputs.hideTags = pressed;
 }
 
 window.addEventListener('keydown', (e) => setInput(e.key.toLowerCase(), true));

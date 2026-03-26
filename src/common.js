@@ -37,9 +37,10 @@ export const RULES = {
   maxScore: 3,
   tickRate: 30,
   moveSpeed: 13,
+  sprintMultiplier: 1.35,
   carrierSpeedMultiplier: 0.84,
-  jumpVelocity: 8,
-  gravity: 22,
+  jumpVelocity: 8.8,
+  gravity: 24,
   tagCooldownMs: 1400,
   respawnInvulnMs: 1500,
   matchSeconds: 7 * 60
