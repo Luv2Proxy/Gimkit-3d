@@ -405,6 +405,18 @@ function onMessage(msg, fromPeerId) {
   }
 }
 
+function loadFlag(team, file) {
+  BABYLON.SceneLoader.ImportMesh("", "./models/", file, render.scene, (meshes) => {
+    const root = new BABYLON.TransformNode(`flag-${team}`, render.scene);
+
+    meshes.forEach(m => m.parent = root);
+
+    root.scaling = new BABYLON.Vector3(1.2, 1.2, 1.2);
+
+    render.flagMeshes.set(team, root);
+  });
+}
+
 function createScene() {
   render.engine = new BABYLON.Engine(canvas, true);
   render.scene = new BABYLON.Scene(render.engine);
@@ -468,8 +480,8 @@ function createScene() {
   whiteMat.diffuseColor = new BABYLON.Color3(0.92, 0.92, 0.92);
   whiteBase.material = whiteMat;
 
-  render.flagMeshes.set(TEAM_BLACK, BABYLON.MeshBuilder.CreateBox('flag-black', { size: 1.6 }, render.scene));
-  render.flagMeshes.set(TEAM_WHITE, BABYLON.MeshBuilder.CreateBox('flag-white', { size: 1.6 }, render.scene));
+  loadFlag(TEAM_BLACK, "flag_black.glb");
+  loadFlag(TEAM_WHITE, "flag_white.glb");
 
   const fbMat = new BABYLON.StandardMaterial('fb', render.scene);
   fbMat.diffuseColor = new BABYLON.Color3(0.06, 0.06, 0.06);
@@ -554,29 +566,44 @@ function maybeSendPose(nowMs) {
 function ensurePlayerMesh(player) {
   if (render.playerMeshes.has(player.id)) return;
 
-  const body = BABYLON.MeshBuilder.CreateCapsule(`p-${player.id}`, { radius: ARENA.playerRadius, height: ARENA.playerHeight }, render.scene);
-  const mat = new BABYLON.StandardMaterial(`pm-${player.id}`, render.scene);
-  mat.diffuseColor = BABYLON.Color3.FromHexString(player.color || '#4dd8ff');
-  body.material = mat;
-  render.playerMeshes.set(player.id, body);
+  BABYLON.SceneLoader.ImportMesh(
+    "",
+    "./models/",          // folder
+    "character.glb",      // your model
+    render.scene,
+    (meshes) => {
+      const root = new BABYLON.TransformNode(`p-${player.id}`, render.scene);
 
-  const panel = new BABYLON.GUI.Rectangle(`tag-${player.id}`);
-  panel.background = 'rgba(0,0,0,0.45)';
-  panel.height = '28px';
-  panel.width = '130px';
-  panel.cornerRadius = 10;
-  panel.thickness = 1;
-  panel.color = 'white';
-  render.adt.addControl(panel);
-  panel.linkWithMesh(body);
-  panel.linkOffsetY = -62;
+      meshes.forEach(m => {
+        m.parent = root;
+      });
 
-  const text = new BABYLON.GUI.TextBlock(`tag-text-${player.id}`, player.username);
-  text.fontSize = 14;
-  text.color = 'white';
-  panel.addControl(text);
+      root.scaling = new BABYLON.Vector3(1, 1, 1); // adjust size
+      render.playerMeshes.set(player.id, root);
 
-  render.nameplates.set(player.id, panel);
+      // OPTIONAL: color tint
+      meshes.forEach(m => {
+        if (m.material) {
+          m.material = m.material.clone();
+          m.material.albedoColor = BABYLON.Color3.FromHexString(player.color || '#4dd8ff');
+        }
+      });
+
+      // nameplate (same as before)
+      const panel = new BABYLON.GUI.Rectangle(`tag-${player.id}`);
+      panel.height = '28px';
+      panel.width = '130px';
+      render.adt.addControl(panel);
+      panel.linkWithMesh(root);
+      panel.linkOffsetY = -62;
+
+      const text = new BABYLON.GUI.TextBlock();
+      text.text = player.username;
+      panel.addControl(text);
+
+      render.nameplates.set(player.id, panel);
+    }
+  );
 }
 
 function cleanupPlayerMesh(id) {
