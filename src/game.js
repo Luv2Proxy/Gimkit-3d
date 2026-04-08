@@ -10,6 +10,18 @@ import {
   loadProfile
 } from './common.js';
 import { NetClient } from './network.js';
+import { createFlag } from "./flag.js";
+
+// create flags
+const blackFlag = createFlag(scene, {
+  position: new BABYLON.Vector3(-20, 0, 0),
+  color: new BABYLON.Color3(0.1, 0.1, 0.1)
+});
+
+const whiteFlag = createFlag(scene, {
+  position: new BABYLON.Vector3(20, 0, 0),
+  color: new BABYLON.Color3(1, 1, 1)
+});
 
 const canvas = document.getElementById('arena');
 const errorEl = document.getElementById('error');
@@ -232,9 +244,7 @@ function processTick(match) {
   Object.values(match.flags).forEach((flag) => {
     if (flag.holderId && match.players[flag.holderId]) {
       const holder = match.players[flag.holderId];
-      flag.x = holder.x;
-      flag.y = holder.y + 1.2;
-      flag.z = holder.z;
+      blackFlag.setPosition(new BABYLON.Vector3(flag.x, flag.y, flag.z));
       flag.atBase = false;
     }
   });
@@ -480,15 +490,18 @@ function createScene() {
   whiteMat.diffuseColor = new BABYLON.Color3(0.92, 0.92, 0.92);
   whiteBase.material = whiteMat;
 
-  loadFlag(TEAM_BLACK, "flag_black.glb");
-  loadFlag(TEAM_WHITE, "flag_white.glb");
+  const blackFlag = createFlag(render.scene, {
+    position: new BABYLON.Vector3(-20, 0, 0),
+    color: new BABYLON.Color3(0.1, 0.1, 0.1)
+  });
 
-  const fbMat = new BABYLON.StandardMaterial('fb', render.scene);
-  fbMat.diffuseColor = new BABYLON.Color3(0.06, 0.06, 0.06);
-  render.flagMeshes.get(TEAM_BLACK).material = fbMat;
-  const fwMat = new BABYLON.StandardMaterial('fw', render.scene);
-  fwMat.diffuseColor = new BABYLON.Color3(0.95, 0.95, 0.95);
-  render.flagMeshes.get(TEAM_WHITE).material = fwMat;
+  const whiteFlag = createFlag(render.scene, {
+    position: new BABYLON.Vector3(20, 0, 0),
+    color: new BABYLON.Color3(1, 1, 1)
+  });
+
+  render.flagMeshes.set(TEAM_BLACK, blackFlag);
+  render.flagMeshes.set(TEAM_WHITE, whiteFlag);
 
   render.camera = new BABYLON.UniversalCamera('cam', new BABYLON.Vector3(0, 4, -10), render.scene);
   render.camera.fov = 1.05;
@@ -691,8 +704,10 @@ function syncMeshes(dt) {
   });
 
   Object.values(match.flags).forEach((flag) => {
-    const mesh = render.flagMeshes.get(flag.team);
-    mesh.position.set(flag.x, flag.y + 0.9, flag.z);
+    const flagObj = render.flagMeshes.get(flag.team);
+    if (flagObj) {
+      flagObj.setPosition(new BABYLON.Vector3(flag.x, flag.y, flag.z));
+    }
   });
 }
 
