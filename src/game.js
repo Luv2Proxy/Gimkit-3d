@@ -12,17 +12,6 @@ import {
 import { NetClient } from './network.js';
 import { createFlag } from "./flag.js";
 
-// create flags
-const blackFlag = createFlag(scene, {
-  position: new BABYLON.Vector3(-20, 0, 0),
-  color: new BABYLON.Color3(0.1, 0.1, 0.1)
-});
-
-const whiteFlag = createFlag(scene, {
-  position: new BABYLON.Vector3(20, 0, 0),
-  color: new BABYLON.Color3(1, 1, 1)
-});
-
 const canvas = document.getElementById('arena');
 const errorEl = document.getElementById('error');
 const statEl = {
