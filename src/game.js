@@ -433,6 +433,19 @@ function createScene() {
   gMat.diffuseColor = new BABYLON.Color3(0.12, 0.15, 0.24);
   gMat.specularColor = new BABYLON.Color3(0, 0, 0);
   ground.material = gMat;
+  BABYLON.SceneLoader.ImportMesh(
+    "",
+    "./models/",
+    "character.glb",
+    render.scene,
+    (meshes) => {
+      console.log("✅ Loaded meshes:", meshes);
+    },
+    null,
+    (scene, message, exception) => {
+      console.error("❌ Load failed:", message, exception);
+    }
+  );
 
   const stripe = BABYLON.MeshBuilder.CreateGround('stripe', { width: 1.5, height: ARENA.depth }, render.scene);
   stripe.position.y = 0.01;
